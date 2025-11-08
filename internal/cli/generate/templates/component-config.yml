@@ -1,0 +1,132 @@
+# GTOOL Configuration File
+# This file configures the component testing pipeline
+# Documentation: https://github.com/oswaldo-montano/gtool
+
+# ═══════════════════════════════════════════════════════════
+# VERSION
+# ═══════════════════════════════════════════════════════════
+version: v1
+
+# ═══════════════════════════════════════════════════════════
+# APPLICATION CONFIGURATION
+# ═══════════════════════════════════════════════════════════
+# Technology: golang, nodejs, generic
+app-technology: golang
+
+app-config:
+  # Binary or application name
+  binary-name: myapp
+
+  # Path to the binary (for golang/generic)
+  binary-path: ./bin/myapp
+
+  # Docker image (alternative to binary)
+  # docker-image: myapp:latest
+
+  # Application port
+  port: 8080
+
+  # Environment variables for the application
+  environment:
+    LOG_LEVEL: debug
+    # DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
+# ═══════════════════════════════════════════════════════════
+# TEST CONFIGURATION
+# ═══════════════════════════════════════════════════════════
+# Test launcher: test-launcher-back (Karate), test-launcher-front (Cypress)
+test-launcher: test-launcher-back
+
+test-config:
+  # Test tags to run (e.g., "@smoke", "@integration")
+  tags: "@integration"
+
+  # Path to feature files
+  features-path: ./test/features
+
+  # Path for test reports
+  reports-path: ./test/reports
+
+  # Run tests in parallel
+  parallel: false
+
+# ═══════════════════════════════════════════════════════════
+# THIRD-PARTY SERVICES (MOCKS)
+# ═══════════════════════════════════════════════════════════
+third-party:
+  # List of services to start
+  # Available: postgresql, couchbase, kafka, mountebank, pubsub, gcs
+  mocks:
+    - postgresql
+    # - mountebank
+    # - kafka
+
+  # Configuration for each service
+  mock-config:
+    # PostgreSQL configuration
+    postgresql:
+      image: postgres:16-alpine
+      port: 5432
+      user: postgres
+      password: postgres
+      database: postgres
+      # Path to SQL initialization scripts
+      scripts-path: ./test/component/mocks-data/postgresql
+
+    # Mountebank configuration (commented example)
+    # mountebank:
+    #   port: 2525
+    #   imposters-path: ./test/component/mocks-data/mountebank
+
+    # Couchbase configuration (commented example)
+    # couchbase:
+    #   image: couchbase:community-7.2.0
+    #   bucket: test-bucket
+    #   username: Administrator
+    #   password: password
+
+    # Kafka configuration (commented example)
+    # kafka:
+    #   image: confluentinc/cp-kafka:latest
+    #   port: 9092
+    #   topics:
+    #     - test-topic
+    #     - events-topic
+
+# ═══════════════════════════════════════════════════════════
+# ORCHESTRATION SETTINGS
+# ═══════════════════════════════════════════════════════════
+orchestration:
+  # Start mocks in parallel (faster) or sequential (safer)
+  parallel-mocks: true
+
+  # Maximum time to wait for services to start
+  startup-timeout: 180s
+
+  # Interval between health checks
+  health-check-interval: 3s
+
+  # Maximum number of health check retries
+  health-check-retries: 60
+
+  # Clean up services if startup fails
+  cleanup-on-failure: true
+
+  # Preserve logs after cleanup
+  preserve-logs: true
+
+# ═══════════════════════════════════════════════════════════
+# OBSERVABILITY
+# ═══════════════════════════════════════════════════════════
+observability:
+  # Use structured JSON logs
+  structured-logs: false
+
+  # Log level: debug, info, warn, error
+  log-level: info
+
+  # Enable metrics collection
+  metrics-enabled: true
+
+  # Report format: text, json
+  report-format: text

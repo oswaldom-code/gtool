@@ -9,6 +9,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
+
+	"github.com/oswaldo-montano/gtool/internal/cli/config"
+	"github.com/oswaldo-montano/gtool/internal/cli/generate"
+	"github.com/oswaldo-montano/gtool/internal/cli/services"
 )
 
 var (
@@ -43,6 +47,11 @@ func init() {
 
 	checkError(viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose")))
 	checkError(viper.BindPFlag("config", rootCmd.PersistentFlags().Lookup("config")))
+
+	// Register subcommands
+	rootCmd.AddCommand(generate.NewGenerateCmd())
+	rootCmd.AddCommand(services.NewServicesCmd(&cfgFile))
+	rootCmd.AddCommand(config.NewConfigCmd(&cfgFile))
 }
 
 func initLogger() {

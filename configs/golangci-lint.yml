@@ -1,0 +1,81 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - gosimple       # Simplify code
+    - govet          # Vet examines Go source code
+    - ineffassign    # Detect ineffectual assignments
+    - staticcheck    # Static analysis
+    - unused         # Check for unused code
+    - gofmt          # Check formatting
+    - goimports      # Check imports
+    - misspell       # Check for misspelled words
+    - gocyclo        # Check cyclomatic complexity
+
+  disable:
+    - errcheck       # Too many legitimate ignores in codebase
+    - revive         # Name stuttering not critical for now
+    - goconst        # Repeated strings acceptable in this phase
+    - gosec          # Security checks too strict for dev phase
+
+linters-settings:
+  errcheck:
+    check-blank: true
+    check-type-assertions: false
+
+  govet:
+    enable-all: true
+    disable:
+      - shadow
+      - fieldalignment  # Disabled: memory optimization not critical for now
+
+  gocyclo:
+    min-complexity: 20  # Increased from 15 for parseConfig-like functions
+
+  staticcheck:
+    checks:
+      - all
+      - -SA1019  # Ignore deprecated APIs (Docker SDK transition)
+      - -SA1012  # Ignore nil context in tests
+
+  gosec:
+    excludes:
+      - G104 # Audit errors not checked
+
+  revive:
+    rules:
+      - name: exported
+        disabled: false
+      - name: package-comments
+        disabled: true
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - gosec
+        - goconst
+
+    # Exclude some staticcheck messages
+    - linters:
+        - staticcheck
+      text: "SA9003:"
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+# Minimal settings for now, can be expanded later
+severity:
+  default-severity: warning

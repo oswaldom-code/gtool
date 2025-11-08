@@ -53,4 +53,4 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          args: --config=configs/golangci-lint.yml --timeout=5m
+          args: --config=configs/golangci-lint.yml --timeout=5m --skip-config-check

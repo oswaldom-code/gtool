@@ -1,0 +1,10 @@
+version: v1
+app-technology: golang
+app-config:
+  binary-name: myapp
+  port: 8080
+test-launcher: test-launcher-back
+observability:
+  log-level: info
+orchestration:
+  parallel-mocks: true

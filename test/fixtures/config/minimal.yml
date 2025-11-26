@@ -1,0 +1,6 @@
+version: v1
+app-technology: golang
+app-config:
+  binary-name: test-app
+  port: 8080
+test-launcher: test-launcher-back

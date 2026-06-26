@@ -29,6 +29,7 @@ type Client struct {
 type ContainerConfig struct {
 	Image        string
 	Name         string
+	Cmd          []string
 	Env          []string
 	PortBindings map[string]string
 	Mounts       []Mount
@@ -126,6 +127,7 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 	// Create container
 	containerConfig := &container.Config{
 		Image:        config.Image,
+		Cmd:          config.Cmd,
 		Env:          config.Env,
 		ExposedPorts: exposedPorts,
 		Labels:       config.Labels,

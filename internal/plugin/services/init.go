@@ -9,6 +9,7 @@ import (
 	"github.com/oswaldo-montano/gtool/internal/plugin/services/kafka"
 	"github.com/oswaldo-montano/gtool/internal/plugin/services/mountebank"
 	"github.com/oswaldo-montano/gtool/internal/plugin/services/postgresql"
+	"github.com/oswaldo-montano/gtool/internal/plugin/services/pubsub"
 )
 
 func RegisterAll(registry *plugin.Registry, dockerClient *docker.Client, logger *zap.Logger) error {
@@ -29,6 +30,11 @@ func RegisterAll(registry *plugin.Registry, dockerClient *docker.Client, logger 
 
 	couchbasePlugin := couchbase.NewCouchbasePlugin(dockerClient, logger)
 	if err := registry.RegisterService(couchbasePlugin); err != nil {
+		return err
+	}
+
+	pubsubPlugin := pubsub.NewPubSubPlugin(dockerClient, logger)
+	if err := registry.RegisterService(pubsubPlugin); err != nil {
 		return err
 	}
 

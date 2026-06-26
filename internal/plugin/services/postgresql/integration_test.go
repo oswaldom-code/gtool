@@ -21,10 +21,10 @@ func TestPostgreSQLIntegration(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	log := logger.NewDevelopment()
+	log := logger.Default()
 	defer log.Sync()
 
-	dockerClient, err := docker.NewClient(log)
+	dockerClient, err := docker.NewClient(log.Logger)
 	require.NoError(t, err, "Failed to create Docker client")
 	defer dockerClient.Close()
 
@@ -32,7 +32,7 @@ func TestPostgreSQLIntegration(t *testing.T) {
 	err = dockerClient.Ping(ctx)
 	require.NoError(t, err, "Docker daemon not available")
 
-	plugin := NewPostgreSQLPlugin(dockerClient, log)
+	plugin := NewPostgreSQLPlugin(dockerClient, log.Logger)
 	require.NotNil(t, plugin)
 
 	config := map[string]interface{}{

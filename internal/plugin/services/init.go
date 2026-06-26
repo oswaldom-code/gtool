@@ -5,6 +5,7 @@ import (
 
 	"github.com/oswaldo-montano/gtool/internal/infra/docker"
 	"github.com/oswaldo-montano/gtool/internal/plugin"
+	"github.com/oswaldo-montano/gtool/internal/plugin/services/couchbase"
 	"github.com/oswaldo-montano/gtool/internal/plugin/services/kafka"
 	"github.com/oswaldo-montano/gtool/internal/plugin/services/mountebank"
 	"github.com/oswaldo-montano/gtool/internal/plugin/services/postgresql"
@@ -23,6 +24,11 @@ func RegisterAll(registry *plugin.Registry, dockerClient *docker.Client, logger 
 
 	kafkaPlugin := kafka.NewKafkaPlugin(dockerClient, logger)
 	if err := registry.RegisterService(kafkaPlugin); err != nil {
+		return err
+	}
+
+	couchbasePlugin := couchbase.NewCouchbasePlugin(dockerClient, logger)
+	if err := registry.RegisterService(couchbasePlugin); err != nil {
 		return err
 	}
 

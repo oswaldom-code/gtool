@@ -26,6 +26,51 @@ var (
 	cfgFile    string
 )
 
+// serviceManager is the subset of *mock.Manager used by the commands. Depending
+// on the interface (instead of the concrete type) lets tests inject a fake.
+type serviceManager interface {
+	Start(ctx context.Context, name string, config map[string]interface{}) error
+	Stop(ctx context.Context, name string) error
+	ListRunning() []string
+	GetAllStatuses(ctx context.Context) []*mock.ServiceStatus
+	GetLogs(ctx context.Context, name string, opts *plugin.LogOptions) ([]string, error)
+}
+
+// serviceDeps bundles the runtime dependencies a command needs. ping and close
+// expose the underlying Docker client without leaking it to the command bodies.
+type serviceDeps struct {
+	manager serviceManager
+	ping    func(ctx context.Context) error
+	close   func() error
+}
+
+// depsFactory builds the dependencies for a command run. It is a package
+// variable so tests can replace it with a Docker-free implementation.
+type depsFactory func(cfg *config.Config, log *zap.Logger) (*serviceDeps, error)
+
+var newServiceDeps depsFactory = defaultServiceDeps
+
+// defaultServiceDeps wires the real Docker client, plugin registry and mock
+// manager together.
+func defaultServiceDeps(cfg *config.Config, log *zap.Logger) (*serviceDeps, error) {
+	dockerClient, err := docker.NewClient(log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Docker client: %w", err)
+	}
+
+	registry := plugin.NewRegistry()
+	if err := pluginServices.RegisterAll(registry, dockerClient, log); err != nil {
+		_ = dockerClient.Close()
+		return nil, fmt.Errorf("failed to register plugins: %w", err)
+	}
+
+	return &serviceDeps{
+		manager: mock.NewManager(registry, log, cfg.Orchestration, dockerClient),
+		ping:    dockerClient.Ping,
+		close:   dockerClient.Close,
+	}, nil
+}
+
 func NewServicesCmd(configFile *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "services",
@@ -150,22 +195,17 @@ func runServicesUp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	dockerClient, err := docker.NewClient(log.Logger)
+	deps, err := newServiceDeps(cfg, log.Logger)
 	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
+		return err
 	}
-	defer dockerClient.Close()
+	defer deps.close()
 
-	if err := dockerClient.Ping(ctx); err != nil {
+	if err := deps.ping(ctx); err != nil {
 		return fmt.Errorf("Docker daemon not available: %w", err)
 	}
 
-	registry := plugin.NewRegistry()
-	if err := pluginServices.RegisterAll(registry, dockerClient, log.Logger); err != nil {
-		return fmt.Errorf("failed to register plugins: %w", err)
-	}
-
-	mockManager := mock.NewManager(registry, log.Logger, cfg.Orchestration, dockerClient)
+	mockManager := deps.manager
 
 	servicesToStart := args
 	if len(servicesToStart) == 0 {
@@ -217,18 +257,13 @@ func runServicesDown(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	dockerClient, err := docker.NewClient(log.Logger)
+	deps, err := newServiceDeps(cfg, log.Logger)
 	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
+		return err
 	}
-	defer dockerClient.Close()
+	defer deps.close()
 
-	registry := plugin.NewRegistry()
-	if err := pluginServices.RegisterAll(registry, dockerClient, log.Logger); err != nil {
-		return fmt.Errorf("failed to register plugins: %w", err)
-	}
-
-	mockManager := mock.NewManager(registry, log.Logger, cfg.Orchestration, dockerClient)
+	mockManager := deps.manager
 	servicesToStop := args
 	if len(servicesToStop) == 0 {
 		servicesToStop = mockManager.ListRunning()
@@ -267,18 +302,13 @@ func runServicesStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	dockerClient, err := docker.NewClient(log)
+	deps, err := newServiceDeps(cfg, log)
 	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
+		return err
 	}
-	defer dockerClient.Close()
+	defer deps.close()
 
-	registry := plugin.NewRegistry()
-	if err := pluginServices.RegisterAll(registry, dockerClient, log); err != nil {
-		return fmt.Errorf("failed to register plugins: %w", err)
-	}
-
-	mockManager := mock.NewManager(registry, log, cfg.Orchestration, dockerClient)
+	mockManager := deps.manager
 
 	statuses := mockManager.GetAllStatuses(ctx)
 
@@ -334,18 +364,13 @@ func runServicesLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	dockerClient, err := docker.NewClient(log)
+	deps, err := newServiceDeps(cfg, log)
 	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
+		return err
 	}
-	defer dockerClient.Close()
+	defer deps.close()
 
-	registry := plugin.NewRegistry()
-	if err := pluginServices.RegisterAll(registry, dockerClient, log); err != nil {
-		return fmt.Errorf("failed to register plugins: %w", err)
-	}
-
-	mockManager := mock.NewManager(registry, log, cfg.Orchestration, dockerClient)
+	mockManager := deps.manager
 
 	servicesToLog := args
 	if allLogs {

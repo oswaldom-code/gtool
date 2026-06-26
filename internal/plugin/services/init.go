@@ -6,6 +6,7 @@ import (
 	"github.com/oswaldo-montano/gtool/internal/infra/docker"
 	"github.com/oswaldo-montano/gtool/internal/plugin"
 	"github.com/oswaldo-montano/gtool/internal/plugin/services/couchbase"
+	"github.com/oswaldo-montano/gtool/internal/plugin/services/gcs"
 	"github.com/oswaldo-montano/gtool/internal/plugin/services/kafka"
 	"github.com/oswaldo-montano/gtool/internal/plugin/services/mountebank"
 	"github.com/oswaldo-montano/gtool/internal/plugin/services/postgresql"
@@ -35,6 +36,11 @@ func RegisterAll(registry *plugin.Registry, dockerClient *docker.Client, logger 
 
 	pubsubPlugin := pubsub.NewPubSubPlugin(dockerClient, logger)
 	if err := registry.RegisterService(pubsubPlugin); err != nil {
+		return err
+	}
+
+	gcsPlugin := gcs.NewGCSPlugin(dockerClient, logger)
+	if err := registry.RegisterService(gcsPlugin); err != nil {
 		return err
 	}
 

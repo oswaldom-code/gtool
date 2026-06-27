@@ -73,7 +73,7 @@ func (p *PostgreSQLPlugin) Launch(ctx context.Context, config map[string]interfa
 
 	// Pull image
 	p.logger.Info("pulling PostgreSQL image", zap.String("image", cfg.Image))
-	if err := p.docker.PullImage(ctx, cfg.Image); err != nil {
+	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull PostgreSQL image")
 	}
 

@@ -77,7 +77,7 @@ func (p *PubSubPlugin) Launch(ctx context.Context, config map[string]interface{}
 	p.config = cfg
 
 	p.logger.Info("pulling Pub/Sub image", zap.String("image", cfg.Image))
-	if err := p.docker.PullImage(ctx, cfg.Image); err != nil {
+	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull Pub/Sub image")
 	}
 

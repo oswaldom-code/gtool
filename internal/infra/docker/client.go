@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -35,6 +36,7 @@ type ContainerConfig struct {
 	Mounts       []Mount
 	NetworkMode  string
 	AutoRemove   bool
+	Init         bool
 	Labels       map[string]string
 }
 
@@ -91,6 +93,35 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 	return nil
 }
 
+// ImageExists reports whether an image is already present in the local Docker
+// image store, so callers can avoid a registry pull for local-only images
+// (e.g. private STABLE images or freshly built ones).
+func (c *Client) ImageExists(ctx context.Context, imageName string) (bool, error) {
+	_, _, err := c.cli.ImageInspectWithRaw(ctx, imageName)
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			return false, nil
+		}
+		return false, gtErrors.Wrap(err, gtErrors.ErrDockerFailed,
+			fmt.Sprintf("failed to inspect image %s", imageName))
+	}
+	return true, nil
+}
+
+// EnsureImage makes an image available, preferring a local copy: if the image
+// already exists locally it skips the pull, otherwise it pulls from the registry.
+func (c *Client) EnsureImage(ctx context.Context, imageName string) error {
+	exists, err := c.ImageExists(ctx, imageName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		c.logger.Info("image already present locally, skipping pull", zap.String("image", imageName))
+		return nil
+	}
+	return c.PullImage(ctx, imageName)
+}
+
 func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (string, error) {
 	c.logger.Info("creating container",
 		zap.String("image", config.Image),
@@ -141,6 +172,11 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 
 	if config.NetworkMode != "" {
 		hostConfig.NetworkMode = container.NetworkMode(config.NetworkMode)
+	}
+
+	if config.Init {
+		initFlag := true
+		hostConfig.Init = &initFlag
 	}
 
 	resp, err := c.cli.ContainerCreate(
@@ -206,6 +242,40 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 
 	c.logger.Info("container removed", zap.String("containerID", containerID))
 	return nil
+}
+
+// RemoveContainerByName force-removes any container with the given exact name
+// (in any state). It is a no-op when no such container exists, mirroring the
+// legacy "remove_container_if_exists" behaviour. Returns true if one was removed.
+func (c *Client) RemoveContainerByName(ctx context.Context, name string) (bool, error) {
+	args := filters.NewArgs()
+	args.Add("name", name)
+
+	containers, err := c.cli.ContainerList(ctx, container.ListOptions{All: true, Filters: args})
+	if err != nil {
+		return false, gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to list containers")
+	}
+
+	removed := false
+	for _, ct := range containers {
+		// Docker's name filter matches substrings; require an exact match.
+		matched := false
+		for _, n := range ct.Names {
+			if strings.TrimPrefix(n, "/") == name {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		if err := c.RemoveContainer(ctx, ct.ID, true); err != nil {
+			return removed, err
+		}
+		removed = true
+	}
+
+	return removed, nil
 }
 
 func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail int) (string, error) {

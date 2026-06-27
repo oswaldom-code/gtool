@@ -71,7 +71,7 @@ func (p *MountebankPlugin) Launch(ctx context.Context, config map[string]interfa
 	p.config = cfg
 
 	p.logger.Info("pulling Mountebank image", zap.String("image", cfg.Image))
-	if err := p.docker.PullImage(ctx, cfg.Image); err != nil {
+	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull Mountebank image")
 	}
 

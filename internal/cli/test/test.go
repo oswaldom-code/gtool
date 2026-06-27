@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -15,6 +16,7 @@ import (
 	"github.com/oswaldo-montano/gtool/internal/core/mock"
 	"github.com/oswaldo-montano/gtool/internal/core/orchestrator"
 	coreTest "github.com/oswaldo-montano/gtool/internal/core/test"
+	"github.com/oswaldo-montano/gtool/internal/core/test/stablekarate"
 	"github.com/oswaldo-montano/gtool/internal/infra/docker"
 	"github.com/oswaldo-montano/gtool/internal/plugin"
 	pluginServices "github.com/oswaldo-montano/gtool/internal/plugin/services"
@@ -82,7 +84,75 @@ Whatever is started is always cleaned up, including on Ctrl-C.`,
 	}
 
 	cfgFile = configFile
+	cmd.AddCommand(newKarateCmd())
 	return cmd
+}
+
+var (
+	karateTags        string
+	karateUrlsToBlock string
+	karateFeatures    string
+	karateReports     string
+	karateImage       string
+	karateNoOpen      bool
+)
+
+// newKarateCmd builds `gtool test karate`, reproducing the legacy
+// "component e" (exec-only-tests): it runs the Karate launcher against the
+// already-running mocks and app and opens the HTML report.
+func newKarateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "karate",
+		Short: "Run only the Karate component tests (mocks and app must already be running)",
+		Long: `Run the Karate backend test launcher against the already-running mocks and
+application, mounting test/component/features and writing the HTML report to
+test/component/reports. The report is opened in the browser when it finishes.
+
+Bring the environment up first with:
+  gtool services up --stable
+  gtool app start --native`,
+		RunE: runKarate,
+	}
+	cmd.Flags().StringVar(&karateTags, "tags", "", "Karate tags filter (TAGS)")
+	cmd.Flags().StringVar(&karateUrlsToBlock, "urls-to-block", "", "comma-separated URLs to block")
+	cmd.Flags().StringVar(&karateFeatures, "features", "", "features path (default test/component/features)")
+	cmd.Flags().StringVar(&karateReports, "reports", "", "reports path (default test/component/reports)")
+	cmd.Flags().StringVar(&karateImage, "image", "", "override the test launcher image")
+	cmd.Flags().BoolVar(&karateNoOpen, "no-open", false, "do not open the HTML report when finished")
+	return cmd
+}
+
+func runKarate(_ *cobra.Command, _ []string) error {
+	ctx := context.Background()
+	log := logger.Default()
+	defer log.Sync()
+
+	dockerClient, err := docker.NewClient(log.Logger)
+	if err != nil {
+		return fmt.Errorf("failed to create Docker client: %w", err)
+	}
+	defer dockerClient.Close()
+	if err := dockerClient.Ping(ctx); err != nil {
+		return fmt.Errorf("Docker daemon not available: %w", err)
+	}
+
+	runner := stablekarate.New(dockerClient, log.Logger)
+	result, err := runner.Run(ctx, stablekarate.Options{
+		Image:        karateImage,
+		Tags:         karateTags,
+		UrlsToBlock:  karateUrlsToBlock,
+		FeaturesPath: karateFeatures,
+		ReportsPath:  karateReports,
+		Open:         !karateNoOpen,
+	})
+	if err != nil {
+		return err
+	}
+	if !result.Passed {
+		return fmt.Errorf("karate tests failed (exit code %d)", result.ExitCode)
+	}
+	fmt.Printf("✅ Karate tests passed in %s\n", result.Duration.Round(time.Second))
+	return nil
 }
 
 // configFilePath returns the current value of the --config flag, or "".

@@ -14,6 +14,7 @@ import (
 	coreConfig "github.com/oswaldo-montano/gtool/internal/core/config"
 	"github.com/oswaldo-montano/gtool/internal/core/mock"
 	"github.com/oswaldo-montano/gtool/internal/core/orchestrator"
+	coreTest "github.com/oswaldo-montano/gtool/internal/core/test"
 	"github.com/oswaldo-montano/gtool/internal/infra/docker"
 	"github.com/oswaldo-montano/gtool/internal/plugin"
 	pluginServices "github.com/oswaldo-montano/gtool/internal/plugin/services"
@@ -56,7 +57,7 @@ func defaultPipeline(cfg *config.Config, log *zap.Logger) (*pipelineDeps, error)
 
 	mockMgr := mock.NewManager(registry, log, cfg.Orchestration, dockerClient)
 	appMgr := coreApp.NewDockerManager(dockerClient, log)
-	tests := orchestrator.NewStubTestRunner(log)
+	tests := coreTest.NewKarateRunner(dockerClient, "", log)
 
 	return &pipelineDeps{
 		pipeline: orchestrator.NewOrchestrator(cfg, mockMgr, appMgr, tests, log),
@@ -117,6 +118,10 @@ func runTest(_ *cobra.Command, _ []string) error {
 
 	if runErr != nil {
 		return fmt.Errorf("pipeline failed: %w", runErr)
+	}
+
+	if result != nil && result.Test != nil && result.Test.Failed > 0 {
+		return fmt.Errorf("tests failed: %d of %d failed", result.Test.Failed, result.Test.Total)
 	}
 
 	fmt.Println("\n✅ Pipeline completed")

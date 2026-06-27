@@ -12,8 +12,10 @@ import (
 	"go.uber.org/zap"
 
 	coreApp "github.com/oswaldo-montano/gtool/internal/core/app"
+	"github.com/oswaldo-montano/gtool/internal/core/app/nativeapp"
 	coreConfig "github.com/oswaldo-montano/gtool/internal/core/config"
 	"github.com/oswaldo-montano/gtool/internal/core/mock"
+	"github.com/oswaldo-montano/gtool/internal/core/mock/stablemocks"
 	"github.com/oswaldo-montano/gtool/internal/core/orchestrator"
 	coreTest "github.com/oswaldo-montano/gtool/internal/core/test"
 	"github.com/oswaldo-montano/gtool/internal/core/test/stablekarate"
@@ -84,9 +86,20 @@ Whatever is started is always cleaned up, including on Ctrl-C.`,
 	}
 
 	cfgFile = configFile
+	cmd.Flags().BoolVar(&stableMode, "stable", false, "reproduce legacy 'component t' using STABLE mocks + native app + Karate")
+	cmd.Flags().StringVar(&stableTags, "tags", "", "Karate tags filter (with --stable)")
+	cmd.Flags().StringVar(&stableBuildConfig, "build-config", "build-config.yml", "path to build-config.yml (with --stable)")
+	cmd.Flags().BoolVar(&stableNoOpen, "no-open", false, "do not open the HTML report when finished (with --stable)")
 	cmd.AddCommand(newKarateCmd())
 	return cmd
 }
+
+var (
+	stableMode        bool
+	stableTags        string
+	stableBuildConfig string
+	stableNoOpen      bool
+)
 
 var (
 	karateTags        string
@@ -176,6 +189,10 @@ func runTest(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	if stableMode {
+		return runStableTest(ctx, log.Logger, cfg)
+	}
+
 	deps, err := newPipeline(cfg, log.Logger)
 	if err != nil {
 		return err
@@ -195,6 +212,65 @@ func runTest(_ *cobra.Command, _ []string) error {
 	}
 
 	fmt.Println("\n✅ Pipeline completed")
+	return nil
+}
+
+// runStableTest reproduces the legacy "component t": prepare STABLE mocks,
+// launch the native app, run Karate, then always tear app and mocks down
+// (LIFO defers run even on test failure or Ctrl-C).
+func runStableTest(ctx context.Context, log *zap.Logger, cfg *config.Config) error {
+	dockerClient, err := docker.NewClient(log)
+	if err != nil {
+		return fmt.Errorf("failed to create Docker client: %w", err)
+	}
+	defer dockerClient.Close()
+	if err := dockerClient.Ping(ctx); err != nil {
+		return fmt.Errorf("Docker daemon not available: %w", err)
+	}
+
+	mocks, err := stablemocks.New(dockerClient, log)
+	if err != nil {
+		return err
+	}
+	app, err := nativeapp.New(log, stableBuildConfig)
+	if err != nil {
+		return err
+	}
+	karate := stablekarate.New(dockerClient, log)
+
+	fmt.Println("▶ Phase 1/3: starting STABLE mocks...")
+	if err := mocks.Up(ctx, nil, cfg); err != nil {
+		_ = mocks.Down(context.Background(), nil)
+		return fmt.Errorf("failed to start mocks: %w", err)
+	}
+	defer func() {
+		fmt.Println("🧹 Stopping mocks...")
+		_ = mocks.Down(context.Background(), nil)
+	}()
+
+	fmt.Println("\n▶ Phase 2/3: starting native app...")
+	if err := app.Start(ctx); err != nil {
+		_ = app.Stop(context.Background())
+		return fmt.Errorf("failed to start app: %w", err)
+	}
+	defer func() {
+		fmt.Println("🧹 Stopping app...")
+		_ = app.Stop(context.Background())
+	}()
+
+	fmt.Println("\n▶ Phase 3/3: running Karate tests...")
+	result, err := karate.Run(ctx, stablekarate.Options{
+		Tags: stableTags,
+		Open: !stableNoOpen,
+	})
+	if err != nil {
+		return fmt.Errorf("test run failed: %w", err)
+	}
+	if !result.Passed {
+		return fmt.Errorf("tests failed (exit code %d)", result.ExitCode)
+	}
+
+	fmt.Printf("\n✅ Pipeline completed (Karate passed in %s)\n", result.Duration.Round(time.Second))
 	return nil
 }
 

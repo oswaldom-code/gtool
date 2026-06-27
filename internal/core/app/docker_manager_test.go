@@ -173,6 +173,19 @@ func TestDockerManager_Status(t *testing.T) {
 		assert.Equal(t, 8080, st.Port)
 	})
 
+	t.Run("skips unmapped exposed ports", func(t *testing.T) {
+		d := &fakeDocker{containers: []types.Container{{
+			State: "running",
+			Image: "nginx:alpine",
+			Ports: []types.Port{{PrivatePort: 80}, {PublicPort: 8080}},
+		}}}
+		m := NewDockerManager(d, nil)
+
+		st, err := m.Status(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, 8080, st.Port, "should report the host-published port, not the exposed one")
+	})
+
 	t.Run("not found", func(t *testing.T) {
 		m := NewDockerManager(&fakeDocker{}, nil)
 

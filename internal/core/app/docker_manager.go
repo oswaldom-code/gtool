@@ -152,8 +152,13 @@ func (m *DockerManager) Status(ctx context.Context) (*AppStatus, error) {
 		Image:   c.Image,
 		Running: c.State == "running",
 	}
-	if len(c.Ports) > 0 {
-		status.Port = int(c.Ports[0].PublicPort)
+	// A container may expose unmapped ports (PublicPort 0) alongside the
+	// published one; report the first port actually bound to the host.
+	for _, p := range c.Ports {
+		if p.PublicPort > 0 {
+			status.Port = int(p.PublicPort)
+			break
+		}
 	}
 	return status, nil
 }

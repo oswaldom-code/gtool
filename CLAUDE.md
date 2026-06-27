@@ -24,9 +24,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **USE** typed errors from `pkg/errors/errors.go` (never plain errors)
 - **USE** structured logging with zap (never fmt.Println for logs)
 - **AVOID** creating documentation files unless explicitly requested
-- **NEVER** create example/demo executable files (e.g., `*_example.go`, `examples/`)
+- **AVOID** scattering ad-hoc example/demo files (e.g., `*_example.go`) through the codebase
   - Documentation belongs in `docs/` markdown files
   - Runnable code belongs in tests (`*_test.go`) or the main application
+  - Self-contained sample applications live under `examples/` (each with its own `go.mod`), used to exercise the gtool pipeline end-to-end
 - **Only** add code comments strictly necessary for understanding complex logic
 ### File Standards
 - **USE** `.yml` extension for all YAML configuration files (industry standard)

@@ -1,0 +1,34 @@
+version: v1
+
+# The application under test: built from the Dockerfile in this directory.
+app-technology: golang
+app-config:
+  docker-image: postgres-app:latest
+  port: 8080
+  environment:
+    # On Linux the app container reaches the host-published mock via the host
+    # gateway; see README for networking notes.
+    DB_HOST: host.docker.internal
+    DB_PORT: "5432"
+    DB_USER: postgres
+    DB_PASSWORD: postgres
+    DB_NAME: postgres
+
+# Backend API tests (Karate).
+test-launcher: test-launcher-back
+test-config:
+  features-path: ./features
+  reports-path: ./reports
+  tags: smoke
+
+# Mock dependencies started by gtool.
+third-party:
+  mocks:
+    - postgresql
+  mock-config:
+    postgresql:
+      port: "5432"
+      user: postgres
+      password: postgres
+      database: postgres
+      scripts-path: ./init

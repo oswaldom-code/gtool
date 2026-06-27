@@ -59,7 +59,7 @@ func injectDeps(t *testing.T, mgr appManager) {
 		dockerImage = ""
 		appPort = 0
 		appEnv = nil
-		cfgFile = ""
+		cfgFile = nil
 	})
 	newAppDeps = func(_ *zap.Logger) (*appDeps, error) {
 		return &appDeps{manager: mgr, close: func() error { return nil }}, nil
@@ -81,7 +81,7 @@ func TestNewAppCmd(t *testing.T) {
 
 func TestRunStart(t *testing.T) {
 	t.Run("starts with image from flag", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		mgr := &fakeManager{}
 		injectDeps(t, mgr)
 		dockerImage = "myapp:latest"
@@ -98,7 +98,7 @@ func TestRunStart(t *testing.T) {
 	})
 
 	t.Run("propagates start failure", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		injectDeps(t, &fakeManager{startErr: errors.New("boom")})
 		dockerImage = "myapp:latest"
 
@@ -127,7 +127,7 @@ func TestRunStop(t *testing.T) {
 }
 
 func TestRunRestart(t *testing.T) {
-	cfgFile = ""
+	cfgFile = nil
 	mgr := &fakeManager{}
 	injectDeps(t, mgr)
 	dockerImage = "myapp:latest"

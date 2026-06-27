@@ -18,12 +18,21 @@ import (
 )
 
 var (
-	cfgFile     string
+	cfgFile     *string
 	dockerImage string
 	appPort     int
 	appEnv      map[string]string
 	logsTail    int
 )
+
+// configFilePath returns the current --config value, dereferenced at run time
+// because the persistent flag is parsed after the command is constructed.
+func configFilePath() string {
+	if cfgFile == nil {
+		return ""
+	}
+	return *cfgFile
+}
 
 // appManager is the subset of *coreApp.DockerManager used by the commands, so
 // tests can inject a fake.
@@ -75,9 +84,7 @@ Examples:
   gtool app stop`,
 	}
 
-	if configFile != nil {
-		cfgFile = *configFile
-	}
+	cfgFile = configFile
 
 	cmd.AddCommand(newStartCmd(), newStopCmd(), newRestartCmd(), newStatusCmd(), newLogsCmd())
 	return cmd
@@ -122,7 +129,7 @@ func runStart(_ *cobra.Command, _ []string) error {
 	log := logger.Default()
 	defer log.Sync()
 
-	cfg, err := loadConfigOrDefault(cfgFile)
+	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -169,7 +176,7 @@ func runRestart(_ *cobra.Command, _ []string) error {
 	log := logger.Default()
 	defer log.Sync()
 
-	cfg, err := loadConfigOrDefault(cfgFile)
+	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}

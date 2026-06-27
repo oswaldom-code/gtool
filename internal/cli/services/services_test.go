@@ -81,7 +81,7 @@ func TestNewServicesCmd(t *testing.T) {
 func TestNewServicesCmd_StoresConfigFile(t *testing.T) {
 	file := "my-config.yml"
 	_ = NewServicesCmd(&file)
-	assert.Equal(t, "my-config.yml", cfgFile)
+	assert.Equal(t, "my-config.yml", configFilePath())
 }
 
 func TestServicesLogsCmd_Flags(t *testing.T) {
@@ -102,7 +102,7 @@ func TestRunServicesLogs_RequiresServiceOrAll(t *testing.T) {
 
 func TestRunServicesUp(t *testing.T) {
 	t.Run("starts requested services", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		mgr := &fakeManager{}
 		injectDeps(t, mgr, nil)
 
@@ -113,7 +113,7 @@ func TestRunServicesUp(t *testing.T) {
 	})
 
 	t.Run("fails when daemon is unavailable", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		injectDeps(t, &fakeManager{}, errors.New("no daemon"))
 
 		err := runServicesUp(newServicesUpCmd(), []string{"postgresql"})
@@ -123,7 +123,7 @@ func TestRunServicesUp(t *testing.T) {
 	})
 
 	t.Run("errors when no services configured", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		injectDeps(t, &fakeManager{}, nil)
 
 		// Default config has no mocks, so an argless up has nothing to start.
@@ -134,7 +134,7 @@ func TestRunServicesUp(t *testing.T) {
 	})
 
 	t.Run("propagates start failure", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		injectDeps(t, &fakeManager{startErr: errors.New("boom")}, nil)
 
 		err := runServicesUp(newServicesUpCmd(), []string{"postgresql"})
@@ -146,7 +146,7 @@ func TestRunServicesUp(t *testing.T) {
 
 func TestRunServicesDown(t *testing.T) {
 	t.Run("stops explicit services", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		mgr := &fakeManager{}
 		injectDeps(t, mgr, nil)
 
@@ -157,7 +157,7 @@ func TestRunServicesDown(t *testing.T) {
 	})
 
 	t.Run("stops running services when none specified", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		mgr := &fakeManager{running: []string{"kafka"}}
 		injectDeps(t, mgr, nil)
 
@@ -168,7 +168,7 @@ func TestRunServicesDown(t *testing.T) {
 	})
 
 	t.Run("no-op when nothing is running", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		mgr := &fakeManager{running: nil}
 		injectDeps(t, mgr, nil)
 
@@ -179,7 +179,7 @@ func TestRunServicesDown(t *testing.T) {
 	})
 
 	t.Run("continues past a stop failure", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		mgr := &fakeManager{stopErr: errors.New("boom")}
 		injectDeps(t, mgr, nil)
 
@@ -192,7 +192,7 @@ func TestRunServicesDown(t *testing.T) {
 
 func TestRunServicesStatus(t *testing.T) {
 	t.Run("renders statuses", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		mgr := &fakeManager{statuses: []*mock.ServiceStatus{
 			{Name: "postgresql", Status: "running", Port: 5432, Uptime: time.Minute},
 			{Name: "kafka", Status: "stopped"},
@@ -205,7 +205,7 @@ func TestRunServicesStatus(t *testing.T) {
 	})
 
 	t.Run("handles no services", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		injectDeps(t, &fakeManager{}, nil)
 
 		err := runServicesStatus(newServicesStatusCmd(), nil)
@@ -215,7 +215,7 @@ func TestRunServicesStatus(t *testing.T) {
 
 func TestRunServicesLogs(t *testing.T) {
 	t.Run("prints logs for a service", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		allLogs = false
 		mgr := &fakeManager{logs: []string{"line1", "line2"}}
 		injectDeps(t, mgr, nil)
@@ -225,7 +225,7 @@ func TestRunServicesLogs(t *testing.T) {
 	})
 
 	t.Run("with --all uses running services", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		mgr := &fakeManager{running: []string{"postgresql"}, logs: []string{"line1"}}
 		injectDeps(t, mgr, nil)
 
@@ -239,7 +239,7 @@ func TestRunServicesLogs(t *testing.T) {
 	})
 
 	t.Run("errors when --all but nothing running", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		injectDeps(t, &fakeManager{running: nil}, nil)
 
 		cmd := newServicesLogsCmd()
@@ -252,7 +252,7 @@ func TestRunServicesLogs(t *testing.T) {
 	})
 
 	t.Run("continues past a logs failure", func(t *testing.T) {
-		cfgFile = ""
+		cfgFile = nil
 		allLogs = false
 		mgr := &fakeManager{logsErr: errors.New("boom")}
 		injectDeps(t, mgr, nil)

@@ -23,8 +23,17 @@ var (
 	followLogs bool
 	allLogs    bool
 	tailLines  int
-	cfgFile    string
+	cfgFile    *string
 )
+
+// configFilePath returns the current --config value, dereferenced at run time
+// because the persistent flag is parsed after the command is constructed.
+func configFilePath() string {
+	if cfgFile == nil {
+		return ""
+	}
+	return *cfgFile
+}
 
 // serviceManager is the subset of *mock.Manager used by the commands. Depending
 // on the interface (instead of the concrete type) lets tests inject a fake.
@@ -95,9 +104,7 @@ Examples:
 	}
 
 	// Store reference to config file
-	if configFile != nil {
-		cfgFile = *configFile
-	}
+	cfgFile = configFile
 
 	// Create subcommands
 	upCmd := newServicesUpCmd()
@@ -190,7 +197,7 @@ func runServicesUp(cmd *cobra.Command, args []string) error {
 	log := logger.Default()
 	defer log.Sync()
 
-	cfg, err := loadConfigOrDefault(cfgFile)
+	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -252,7 +259,7 @@ func runServicesDown(cmd *cobra.Command, args []string) error {
 	log := logger.Default()
 	defer log.Sync()
 
-	cfg, err := loadConfigOrDefault(cfgFile)
+	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -297,7 +304,7 @@ func runServicesStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	log := zap.NewNop() // Silent logger for status
 
-	cfg, err := loadConfigOrDefault(cfgFile)
+	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -359,7 +366,7 @@ func runServicesLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("please specify a service or use --all flag")
 	}
 
-	cfg, err := loadConfigOrDefault(cfgFile)
+	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}

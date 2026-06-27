@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	coreApp "github.com/oswaldo-montano/gtool/internal/core/app"
+	"github.com/oswaldo-montano/gtool/internal/core/app/nativeapp"
 	coreConfig "github.com/oswaldo-montano/gtool/internal/core/config"
 	"github.com/oswaldo-montano/gtool/internal/infra/docker"
 	"github.com/oswaldo-montano/gtool/internal/plugin"
@@ -18,11 +19,13 @@ import (
 )
 
 var (
-	cfgFile     *string
-	dockerImage string
-	appPort     int
-	appEnv      map[string]string
-	logsTail    int
+	cfgFile         *string
+	dockerImage     string
+	appPort         int
+	appEnv          map[string]string
+	logsTail        int
+	nativeMode      bool
+	buildConfigFile string
 )
 
 // configFilePath returns the current --config value, dereferenced at run time
@@ -99,11 +102,16 @@ func newStartCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dockerImage, "docker-image", "", "Docker image to run (overrides config)")
 	cmd.Flags().IntVar(&appPort, "port", 0, "application port (overrides config)")
 	cmd.Flags().StringToStringVar(&appEnv, "env", nil, "environment variables (KEY=VALUE)")
+	cmd.Flags().BoolVar(&nativeMode, "native", false, "launch the build-config binaries as native processes (like legacy 'component r')")
+	cmd.Flags().StringVar(&buildConfigFile, "build-config", "build-config.yml", "path to build-config.yml (with --native)")
 	return cmd
 }
 
 func newStopCmd() *cobra.Command {
-	return &cobra.Command{Use: "stop", Short: "Stop the application", RunE: runStop}
+	cmd := &cobra.Command{Use: "stop", Short: "Stop the application", RunE: runStop}
+	cmd.Flags().BoolVar(&nativeMode, "native", false, "stop the native build-config binaries (like legacy 'component p')")
+	cmd.Flags().StringVar(&buildConfigFile, "build-config", "build-config.yml", "path to build-config.yml (with --native)")
+	return cmd
 }
 
 func newRestartCmd() *cobra.Command {
@@ -128,6 +136,18 @@ func runStart(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
 	log := logger.Default()
 	defer log.Sync()
+
+	if nativeMode {
+		launcher, err := nativeapp.New(log.Logger, buildConfigFile)
+		if err != nil {
+			return err
+		}
+		if err := launcher.Start(ctx); err != nil {
+			return err
+		}
+		fmt.Printf("✅ Native app started. Use 'gtool app stop --native' to stop it.\n")
+		return nil
+	}
 
 	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
@@ -155,6 +175,14 @@ func runStop(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
 	log := logger.Default()
 	defer log.Sync()
+
+	if nativeMode {
+		launcher, err := nativeapp.New(log.Logger, buildConfigFile)
+		if err != nil {
+			return err
+		}
+		return launcher.Stop(ctx)
+	}
 
 	deps, err := newAppDeps(log.Logger)
 	if err != nil {

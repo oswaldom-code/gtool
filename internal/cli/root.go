@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
+	"github.com/oswaldo-montano/gtool/internal/cli/app"
 	"github.com/oswaldo-montano/gtool/internal/cli/config"
 	"github.com/oswaldo-montano/gtool/internal/cli/generate"
 	"github.com/oswaldo-montano/gtool/internal/cli/services"
@@ -52,6 +53,7 @@ func init() {
 	rootCmd.AddCommand(generate.NewGenerateCmd())
 	rootCmd.AddCommand(services.NewServicesCmd(&cfgFile))
 	rootCmd.AddCommand(config.NewConfigCmd(&cfgFile))
+	rootCmd.AddCommand(app.NewAppCmd(&cfgFile))
 }
 
 func initLogger() {

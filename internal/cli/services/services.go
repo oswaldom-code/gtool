@@ -12,6 +12,7 @@ import (
 
 	coreConfig "github.com/oswaldo-montano/gtool/internal/core/config"
 	"github.com/oswaldo-montano/gtool/internal/core/mock"
+	"github.com/oswaldo-montano/gtool/internal/core/mock/stablemocks"
 	"github.com/oswaldo-montano/gtool/internal/infra/docker"
 	"github.com/oswaldo-montano/gtool/internal/plugin"
 	pluginServices "github.com/oswaldo-montano/gtool/internal/plugin/services"
@@ -23,6 +24,7 @@ var (
 	followLogs bool
 	allLogs    bool
 	tailLines  int
+	stableMode bool
 	cfgFile    *string
 )
 
@@ -119,7 +121,7 @@ Examples:
 }
 
 func newServicesUpCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "up [service...]",
 		Short: "Start mock services",
 		Long: `Start one or more mock services.
@@ -130,13 +132,16 @@ Examples:
   gtool services up                  # Start all services from config
   gtool s up postgresql              # Start only PostgreSQL
   gtool s up postgresql kafka        # Start PostgreSQL and Kafka
-  gtool s up --config my-config.yml  # Use specific config file`,
+  gtool s up --config my-config.yml  # Use specific config file
+  gtool s up --stable                # Reproduce legacy "component m" with STABLE images`,
 		RunE: runServicesUp,
 	}
+	cmd.Flags().BoolVar(&stableMode, "stable", false, "use the legacy DIA STABLE mock images and contract (like 'component m')")
+	return cmd
 }
 
 func newServicesDownCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "down [service...]",
 		Short: "Stop mock services",
 		Long: `Stop one or more running mock services.
@@ -146,9 +151,12 @@ If no services are specified, stops all running services.
 Examples:
   gtool services down                # Stop all services
   gtool s down postgresql            # Stop only PostgreSQL
-  gtool s down postgresql kafka      # Stop PostgreSQL and Kafka`,
+  gtool s down postgresql kafka      # Stop PostgreSQL and Kafka
+  gtool s down --stable              # Stop the legacy STABLE mock containers`,
 		RunE: runServicesDown,
 	}
+	cmd.Flags().BoolVar(&stableMode, "stable", false, "stop the legacy DIA STABLE mock containers")
+	return cmd
 }
 
 func newServicesStatusCmd() *cobra.Command {
@@ -200,6 +208,10 @@ func runServicesUp(cmd *cobra.Command, args []string) error {
 	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	if stableMode {
+		return runStableUp(ctx, log.Logger, args, cfg)
 	}
 
 	deps, err := newServiceDeps(cfg, log.Logger)
@@ -262,6 +274,10 @@ func runServicesDown(cmd *cobra.Command, args []string) error {
 	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	if stableMode {
+		return runStableDown(ctx, log.Logger, args)
 	}
 
 	deps, err := newServiceDeps(cfg, log.Logger)
@@ -422,6 +438,56 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+// newStableLauncher builds a Docker-backed STABLE-mode launcher and verifies
+// the Docker daemon is reachable. The caller is responsible for closing the
+// returned client.
+func newStableLauncher(log *zap.Logger) (*stablemocks.Launcher, *docker.Client, error) {
+	dockerClient, err := docker.NewClient(log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create Docker client: %w", err)
+	}
+	if err := dockerClient.Ping(context.Background()); err != nil {
+		_ = dockerClient.Close()
+		return nil, nil, fmt.Errorf("Docker daemon not available: %w", err)
+	}
+	launcher, err := stablemocks.New(dockerClient, log)
+	if err != nil {
+		_ = dockerClient.Close()
+		return nil, nil, err
+	}
+	return launcher, dockerClient, nil
+}
+
+func runStableUp(ctx context.Context, log *zap.Logger, args []string, cfg *config.Config) error {
+	launcher, dockerClient, err := newStableLauncher(log)
+	if err != nil {
+		return err
+	}
+	defer dockerClient.Close()
+
+	if err := launcher.Up(ctx, args, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("\n✨ STABLE mocks started! Use 'gtool s down --stable' to stop them.\n")
+	return nil
+}
+
+func runStableDown(ctx context.Context, log *zap.Logger, args []string) error {
+	launcher, dockerClient, err := newStableLauncher(log)
+	if err != nil {
+		return err
+	}
+	defer dockerClient.Close()
+
+	if err := launcher.Down(ctx, args); err != nil {
+		return err
+	}
+
+	fmt.Println("✨ STABLE mocks stopped")
+	return nil
 }
 
 func loadConfigOrDefault(cfgFile string) (*config.Config, error) {

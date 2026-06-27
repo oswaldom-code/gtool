@@ -15,6 +15,7 @@ import (
 	"github.com/oswaldo-montano/gtool/internal/cli/generate"
 	"github.com/oswaldo-montano/gtool/internal/cli/services"
 	"github.com/oswaldo-montano/gtool/internal/cli/test"
+	"github.com/oswaldo-montano/gtool/internal/cli/unit"
 )
 
 var (
@@ -56,6 +57,7 @@ func init() {
 	rootCmd.AddCommand(config.NewConfigCmd(&cfgFile))
 	rootCmd.AddCommand(app.NewAppCmd(&cfgFile))
 	rootCmd.AddCommand(test.NewTestCmd(&cfgFile))
+	rootCmd.AddCommand(unit.NewUnitCmd())
 }
 
 func initLogger() {

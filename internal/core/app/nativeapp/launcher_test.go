@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,7 +62,7 @@ func newTestLauncher(t *testing.T) (*Launcher, *fakeRunner, string) {
 		workDir:         workDir,
 		buildConfigPath: cfgPath,
 		run:             fr,
-		grace:           0,
+		readyTimeout:    0, // skip readiness polling in unit tests
 	}
 	return l, fr, gobin
 }
@@ -112,4 +113,30 @@ func TestStopStopsAllBinaries(t *testing.T) {
 	l, fr, _ := newTestLauncher(t)
 	require.NoError(t, l.Stop(context.Background()))
 	assert.Equal(t, []string{"notification-api", "notification-consumer"}, fr.stopped)
+}
+
+func TestWaitForAppReadyWhenPortAccepts(t *testing.T) {
+	l, _, _ := newTestLauncher(t)
+	l.readyTimeout = 2 * time.Second
+
+	calls := 0
+	l.dial = func(addr string) error {
+		calls++
+		if calls < 3 { // not ready on the first two polls
+			return assert.AnError
+		}
+		return nil // ready on the third
+	}
+
+	require.NoError(t, l.waitForApp(context.Background()))
+	assert.GreaterOrEqual(t, calls, 3)
+}
+
+func TestWaitForAppProceedsOnTimeout(t *testing.T) {
+	l, _, _ := newTestLauncher(t)
+	l.readyTimeout = 50 * time.Millisecond
+	l.dial = func(string) error { return assert.AnError } // never ready
+
+	// Proceeds (no error) even though the app never came up.
+	require.NoError(t, l.waitForApp(context.Background()))
 }

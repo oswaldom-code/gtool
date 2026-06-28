@@ -103,18 +103,23 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "invalid reports path")
 	}
-	// Reset the reports dir, mirroring the legacy "rm -rf && mkdir -p". Old
-	// reports may be owned by the (root) container; ignore removal errors and
-	// let the launcher overwrite them.
-	if err := os.RemoveAll(reportsAbs); err != nil {
-		r.logger.Warn("could not clean reports dir", zap.String("path", reportsAbs), zap.Error(err))
-	}
-	if err := os.MkdirAll(reportsAbs, 0o755); err != nil {
-		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "failed to create reports directory")
-	}
 
 	if err := r.docker.EnsureImage(ctx, image); err != nil {
 		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "failed to ensure test launcher image")
+	}
+
+	// Reset the reports dir, mirroring the legacy "rm -rf && mkdir -p". The
+	// launcher runs as root, so a previous run leaves root-owned files our user
+	// can't delete; if removal fails, chown them back (via a root container) and
+	// retry, replacing the legacy "sudo rm -rf".
+	if err := os.RemoveAll(reportsAbs); err != nil {
+		r.chownToUser(ctx, image, reportsAbs)
+		if err := os.RemoveAll(reportsAbs); err != nil {
+			r.logger.Warn("could not clean reports dir", zap.String("path", reportsAbs), zap.Error(err))
+		}
+	}
+	if err := os.MkdirAll(reportsAbs, 0o755); err != nil {
+		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "failed to create reports directory")
 	}
 
 	containerID, err := r.docker.CreateContainer(ctx, &docker.ContainerConfig{
@@ -162,6 +167,10 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 
 	result := &Result{Passed: exitCode == 0, ExitCode: exitCode, Duration: duration}
 
+	// The launcher wrote the report as root; hand ownership back to the invoking
+	// user so it can be read/opened (e.g. by a sandboxed browser) and cleaned up.
+	r.chownToUser(ctx, image, reportsAbs)
+
 	summary := filepath.Join(reportsAbs, summaryFile)
 	if _, statErr := os.Stat(summary); statErr == nil {
 		result.ReportPath = summary
@@ -174,6 +183,37 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	return result, nil
+}
+
+// chownToUser hands ownership of the reports tree back to the invoking user by
+// running chown inside a short-lived root container (the launcher writes the
+// reports as root). Best-effort: failures are logged, not fatal.
+func (r *Runner) chownToUser(ctx context.Context, image, reportsAbs string) {
+	uid, gid := os.Getuid(), os.Getgid()
+	if uid < 0 || gid < 0 {
+		return // not a Unix host
+	}
+
+	id, err := r.docker.CreateContainer(ctx, &docker.ContainerConfig{
+		Image:      image,
+		Entrypoint: []string{"chown"},
+		Cmd:        []string{"-R", fmt.Sprintf("%d:%d", uid, gid), reportsTarget},
+		Mounts:     []docker.Mount{{Type: "bind", Source: reportsAbs, Target: reportsTarget}},
+		Labels:     map[string]string{"managed-by": "gtool", "gtool-role": "chown"},
+	})
+	if err != nil {
+		r.logger.Warn("could not create chown container", zap.Error(err))
+		return
+	}
+	defer func() { _ = r.docker.RemoveContainer(context.Background(), id, true) }()
+
+	if err := r.docker.StartContainer(ctx, id); err != nil {
+		r.logger.Warn("could not start chown container", zap.Error(err))
+		return
+	}
+	if err := r.docker.WaitForContainer(ctx, id, container.WaitConditionNotRunning); err != nil {
+		r.logger.Warn("chown container did not finish cleanly", zap.Error(err))
+	}
 }
 
 func orDefault(v, def string) string {

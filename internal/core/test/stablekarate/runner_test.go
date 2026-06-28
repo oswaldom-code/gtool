@@ -16,7 +16,7 @@ import (
 )
 
 type fakeDocker struct {
-	created    *docker.ContainerConfig
+	created    []*docker.ContainerConfig
 	exitCode   int
 	removed    bool
 	reportsSrc string
@@ -25,13 +25,24 @@ type fakeDocker struct {
 func (f *fakeDocker) EnsureImage(context.Context, string) error { return nil }
 
 func (f *fakeDocker) CreateContainer(_ context.Context, cfg *docker.ContainerConfig) (string, error) {
-	f.created = cfg
+	f.created = append(f.created, cfg)
 	for _, m := range cfg.Mounts {
 		if m.Target == reportsTarget {
 			f.reportsSrc = m.Source
 		}
 	}
 	return "cid", nil
+}
+
+// karateCfg returns the launcher container config (the one on the host network),
+// as opposed to the helper chown container.
+func (f *fakeDocker) karateCfg() *docker.ContainerConfig {
+	for _, c := range f.created {
+		if c.NetworkMode == "host" {
+			return c
+		}
+	}
+	return nil
 }
 
 func (f *fakeDocker) StartContainer(context.Context, string) error { return nil }
@@ -104,7 +115,7 @@ func TestRunPassesAndOpensReport(t *testing.T) {
 	assert.Equal(t, res.ReportPath, (*opened)[0])
 
 	// Container contract.
-	cc := fd.created
+	cc := fd.karateCfg()
 	require.NotNil(t, cc)
 	assert.Equal(t, defaultImage, cc.Image)
 	assert.Equal(t, "host", cc.NetworkMode)
@@ -162,5 +173,5 @@ func TestRunImageOverride(t *testing.T) {
 	r, _ := newRunner(t, fd)
 	_, err := r.Run(context.Background(), Options{FeaturesPath: features, ReportsPath: reports, Image: "custom:tag"})
 	require.NoError(t, err)
-	assert.Equal(t, "custom:tag", fd.created.Image)
+	assert.Equal(t, "custom:tag", fd.karateCfg().Image)
 }

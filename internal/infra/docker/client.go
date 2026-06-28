@@ -30,6 +30,7 @@ type Client struct {
 type ContainerConfig struct {
 	Image        string
 	Name         string
+	Entrypoint   []string
 	Cmd          []string
 	Env          []string
 	PortBindings map[string]string
@@ -37,6 +38,7 @@ type ContainerConfig struct {
 	NetworkMode  string
 	AutoRemove   bool
 	Init         bool
+	User         string
 	Labels       map[string]string
 }
 
@@ -158,9 +160,11 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 	// Create container
 	containerConfig := &container.Config{
 		Image:        config.Image,
+		Entrypoint:   config.Entrypoint,
 		Cmd:          config.Cmd,
 		Env:          config.Env,
 		ExposedPorts: exposedPorts,
+		User:         config.User,
 		Labels:       config.Labels,
 	}
 

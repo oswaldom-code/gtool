@@ -7,6 +7,7 @@ package nativeapp
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,8 +30,10 @@ const (
 	pubsubEmulatorHost  = "127.0.0.1:9085"
 	storageEmulatorHost = "127.0.0.1:9086"
 
-	// startupGrace mirrors the launcher's trailing "sleep 5".
-	startupGrace = 5 * time.Second
+	// readyTimeout bounds how long we wait for the primary service port to
+	// accept connections before proceeding anyway (replaces a blind "sleep 5").
+	readyTimeout = 30 * time.Second
+	readyPoll    = 300 * time.Millisecond
 
 	defaultBuildConfig = "build-config.yml"
 )
@@ -48,7 +51,8 @@ type Launcher struct {
 	workDir         string
 	buildConfigPath string
 	run             runner
-	grace           time.Duration
+	readyTimeout    time.Duration
+	dial            func(addr string) error
 }
 
 // New builds a Launcher resolving $GOPATH/bin and the working directory.
@@ -73,7 +77,8 @@ func New(logger *zap.Logger, buildConfigPath string) (*Launcher, error) {
 		workDir:         wd,
 		buildConfigPath: buildConfigPath,
 		run:             &osRunner{},
-		grace:           startupGrace,
+		readyTimeout:    readyTimeout,
+		dial:            tcpDial,
 	}, nil
 }
 
@@ -111,10 +116,48 @@ func (l *Launcher) Start(ctx context.Context) error {
 			zap.String("binary", name), zap.Int("port", port), zap.Int("extra-port", extraPort))
 	}
 
-	if l.grace > 0 {
-		time.Sleep(l.grace)
+	return l.waitForApp(ctx)
+}
+
+// waitForApp polls the primary service port (the first binary's, 8080) until it
+// accepts connections, replacing the legacy blind "sleep 5". If it never comes
+// up within readyTimeout it warns and proceeds (best-effort: not every app
+// binds that port).
+func (l *Launcher) waitForApp(ctx context.Context) error {
+	if l.readyTimeout <= 0 || l.dial == nil {
+		return nil
 	}
+
+	addr := fmt.Sprintf("127.0.0.1:%d", basePort)
+	fmt.Printf("⏳ Waiting for app on %s...\n", addr)
+
+	attempts := int(l.readyTimeout / readyPoll)
+	if attempts < 1 {
+		attempts = 1
+	}
+	for i := 0; i < attempts; i++ {
+		if l.dial(addr) == nil {
+			fmt.Printf("✅ App ready on %s\n", addr)
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(readyPoll):
+		}
+	}
+
+	l.logger.Warn("app did not become ready in time; continuing",
+		zap.String("addr", addr), zap.Duration("timeout", l.readyTimeout))
 	return nil
+}
+
+func tcpDial(addr string) error {
+	conn, err := net.DialTimeout("tcp", addr, time.Second)
+	if err != nil {
+		return err
+	}
+	return conn.Close()
 }
 
 // Stop terminates every configured binary by name.

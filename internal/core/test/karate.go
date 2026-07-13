@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	// DefaultLauncherImage is the Karate backend test launcher image. It is an
-	// internal image; override it via NewKarateRunner when needed.
-	DefaultLauncherImage = "test-launcher-back:STABLE"
+	// DefaultLauncherImage is the Karate backend test launcher image (see
+	// test-launcher/). Build it locally with `make test-launcher-image`; override
+	// it via NewKarateRunner when needed.
+	DefaultLauncherImage = "gtool/test-launcher-back:latest"
 
 	featuresTarget = "/app/features"
 	reportsTarget  = "/app/target/karate-reports"

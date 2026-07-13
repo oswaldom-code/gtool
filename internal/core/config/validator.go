@@ -12,7 +12,7 @@ var (
 	supportedVersions     = []string{"v1"}
 	supportedTechnologies = []string{"golang", "nodejs", "generic"}
 	supportedLaunchers    = []string{"test-launcher-back", "test-launcher-front"}
-	supportedMocks        = []string{"mountebank", "couchbase", "postgresql", "kafka", "pubsub", "gcs"}
+	supportedMocks        = []string{"mountebank", "couchbase", "postgresql", "kafka", "pubsub", "gcs", "redis", "mongodb", "mysql", "minio"}
 )
 
 type Validator struct {

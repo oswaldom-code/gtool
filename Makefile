@@ -27,6 +27,11 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/gtool
 
+## test-launcher-image: Build the Karate test launcher image
+test-launcher-image:
+	@echo "Building test launcher image..."
+	docker build -t gtool/test-launcher-back:latest test-launcher/
+
 ## test: Run tests
 test:
 	@echo "Running tests..."

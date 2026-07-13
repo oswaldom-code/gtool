@@ -21,9 +21,10 @@ import (
 )
 
 const (
-	// defaultImage is the private test launcher image, referenced by its full
-	// registry path so the locally present STABLE image resolves without a pull.
-	defaultImage = "europe-southwest1-docker.pkg.dev/dia-com-cicd-pro/es-dia-ecom/test-launcher-back:STABLE"
+	// defaultImage is gtool's own Karate test launcher image (see test-launcher/).
+	// Build it locally with `make test-launcher-image`; EnsureImage skips the
+	// pull when the image is already present.
+	defaultImage = "gtool/test-launcher-back:latest"
 
 	pubsubEmulatorHost = "127.0.0.1:9085"
 

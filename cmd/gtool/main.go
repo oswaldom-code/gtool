@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/oswaldo-montano/gtool/internal/cli"
+	"github.com/oswaldom-code/gtool/internal/cli"
 )
 
 func main() {

@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/oswaldo-montano/gtool/internal/infra/process"
-	"github.com/oswaldo-montano/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/internal/infra/process"
+	"github.com/oswaldom-code/gtool/internal/plugin"
 )
 
 func newGolang() *GolangLauncher {

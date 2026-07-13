@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/oswaldo-montano/gtool/pkg/config"
-	gtErrors "github.com/oswaldo-montano/gtool/pkg/errors"
+	"github.com/oswaldom-code/gtool/pkg/config"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 var (

@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/oswaldo-montano/gtool/internal/infra/docker"
-	"github.com/oswaldo-montano/gtool/pkg/logger"
+	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	"github.com/oswaldom-code/gtool/pkg/logger"
 )
 
 func TestPostgreSQLIntegration(t *testing.T) {

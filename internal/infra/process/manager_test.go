@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	gtErrors "github.com/oswaldo-montano/gtool/pkg/errors"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 func waitNotRunning(t *testing.T, m *Manager, pid int) {

@@ -16,8 +16,8 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"go.uber.org/zap"
 
-	"github.com/oswaldo-montano/gtool/internal/infra/docker"
-	gtErrors "github.com/oswaldo-montano/gtool/pkg/errors"
+	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 const (

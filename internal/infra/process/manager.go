@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	gtErrors "github.com/oswaldo-montano/gtool/pkg/errors"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
 

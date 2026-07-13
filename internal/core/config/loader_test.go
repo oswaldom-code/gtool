@@ -9,9 +9,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/oswaldo-montano/gtool/internal/core/config"
-	pkgConfig "github.com/oswaldo-montano/gtool/pkg/config"
-	gtErrors "github.com/oswaldo-montano/gtool/pkg/errors"
+	"github.com/oswaldom-code/gtool/internal/core/config"
+	pkgConfig "github.com/oswaldom-code/gtool/pkg/config"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 const (

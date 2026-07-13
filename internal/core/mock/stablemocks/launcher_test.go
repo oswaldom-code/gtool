@@ -12,8 +12,8 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
-	"github.com/oswaldo-montano/gtool/internal/infra/docker"
-	"github.com/oswaldo-montano/gtool/pkg/config"
+	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	"github.com/oswaldom-code/gtool/pkg/config"
 )
 
 // fakeDocker records interactions and lets tests drive readiness.

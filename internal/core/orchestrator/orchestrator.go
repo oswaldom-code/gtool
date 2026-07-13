@@ -3,9 +3,9 @@ package orchestrator
 import (
 	"context"
 
-	"github.com/oswaldo-montano/gtool/internal/plugin"
-	"github.com/oswaldo-montano/gtool/pkg/config"
-	gtErrors "github.com/oswaldo-montano/gtool/pkg/errors"
+	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/pkg/config"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
 

@@ -10,14 +10,14 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	coreConfig "github.com/oswaldo-montano/gtool/internal/core/config"
-	"github.com/oswaldo-montano/gtool/internal/core/mock"
-	"github.com/oswaldo-montano/gtool/internal/core/mock/stablemocks"
-	"github.com/oswaldo-montano/gtool/internal/infra/docker"
-	"github.com/oswaldo-montano/gtool/internal/plugin"
-	pluginServices "github.com/oswaldo-montano/gtool/internal/plugin/services"
-	"github.com/oswaldo-montano/gtool/pkg/config"
-	"github.com/oswaldo-montano/gtool/pkg/logger"
+	coreConfig "github.com/oswaldom-code/gtool/internal/core/config"
+	"github.com/oswaldom-code/gtool/internal/core/mock"
+	"github.com/oswaldom-code/gtool/internal/core/mock/stablemocks"
+	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	"github.com/oswaldom-code/gtool/internal/plugin"
+	pluginServices "github.com/oswaldom-code/gtool/internal/plugin/services"
+	"github.com/oswaldom-code/gtool/pkg/config"
+	"github.com/oswaldom-code/gtool/pkg/logger"
 )
 
 var (

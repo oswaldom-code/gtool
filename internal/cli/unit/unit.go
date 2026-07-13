@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	gtErrors "github.com/oswaldo-montano/gtool/pkg/errors"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 const (

@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	coreApp "github.com/oswaldo-montano/gtool/internal/core/app"
-	"github.com/oswaldo-montano/gtool/internal/plugin"
-	"github.com/oswaldo-montano/gtool/pkg/config"
+	coreApp "github.com/oswaldom-code/gtool/internal/core/app"
+	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/pkg/config"
 )
 
 // fakeManager is a controllable appManager for exercising the RunE bodies.

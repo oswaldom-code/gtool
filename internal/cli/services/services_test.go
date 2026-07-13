@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/oswaldo-montano/gtool/internal/core/mock"
-	"github.com/oswaldo-montano/gtool/internal/plugin"
-	"github.com/oswaldo-montano/gtool/pkg/config"
+	"github.com/oswaldom-code/gtool/internal/core/mock"
+	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/pkg/config"
 )
 
 // fakeManager is a controllable serviceManager for exercising the RunE bodies

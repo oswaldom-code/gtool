@@ -17,6 +17,8 @@
 
 ## 🎯 What GTOOL does
 
+GTOOL is a CLI orchestrator for **component testing** of microservices. It stands up a service's external dependencies as mocks, launches the service, runs its test suite against that isolated environment, and tears everything down — reproducibly, with a single command. It replaces hand-managed Docker setups and ad-hoc shell scripts with one typed Go binary featuring structured logging, strict config validation and a plugin architecture.
+
 ```mermaid
 graph LR
     A[🔧 Mocks] --> B[🚀 App]
@@ -31,13 +33,15 @@ graph LR
     style E fill:#ef5350
 ```
 
-GTOOL replaces the internal bash tools `go-tool` (unit tests/build) and `component` (component tests) with a single Go binary — typed and with structured logging. It automates:
+**A single `gtool test` runs the full pipeline:**
 
-1. **Mocks** — starts third-party services in Docker (PostgreSQL, Pub/Sub, Mountebank, Kafka, Couchbase, GCS).
-2. **App** — launches the microservice under test (Docker image or native binaries).
-3. **Tests** — runs the Karate suite (backend) against the app and the mocks.
+1. **Mocks** — starts the third-party dependencies in Docker. 10 built-in services: PostgreSQL, MySQL, MongoDB, Redis, Kafka, Pub/Sub, Couchbase, GCS, MinIO and Mountebank.
+2. **App** — launches the service under test, as a Docker image or as native binaries.
+3. **Tests** — runs the Karate (backend API) suite against the app and its mocks.
 4. **Report** — generates the Karate HTML report and can open it in the browser.
-5. **Cleanup** — always tears down app and mocks, even on failures or Ctrl-C.
+5. **Cleanup** — always tears down app and mocks, even on failure or Ctrl-C.
+
+Beyond the pipeline, GTOOL also runs **unit tests** (`gtool unit` — mock generation + Ginkgo) and can drive each phase on its own (`gtool services`, `gtool app`, `gtool test karate`). New mock services plug in through the `ServicePlugin` interface.
 
 ---
 
@@ -110,7 +114,7 @@ gtool app stop
 ```
 
 ### `gtool unit` (alias `u`) — unit tests
-Reproduces `go-tool u`: generates the mocks from `build-config.yml` (mockgen) and runs the suite with Ginkgo, leaving coverage and the JUnit report in `./coverage`.
+Generates the mocks from `build-config.yml` (mockgen) and runs the suite with Ginkgo, leaving coverage and the JUnit report in `./coverage`.
 ```bash
 gtool unit
 gtool unit --skip-mocks               # runs the tests only
@@ -129,42 +133,6 @@ gtool test karate --tags "@smoke" --no-open
 gtool generate config                 # generates a sample component-config.yml
 gtool version
 ```
-
----
-
-## 🔁 Reproducing the DIA flow (`go-tool` / `component`)
-
-For repos that currently use the internal bash tools, GTOOL reproduces their behavior using the private **STABLE images** and the exact contract (network, ports, mounts, env). These paths are **opt-in** (`--stable`, `--native`) and do not alter gtool's native behavior or the `component-config.yml`.
-
-| DIA tool | GTOOL equivalent |
-|-----------------|----------------------|
-| `go-tool u` | `gtool unit` |
-| `component m` (mocks) | `gtool services up --stable` |
-| `component r` / `p` (app) | `gtool app start --native` / `gtool app stop --native` |
-| `component e` (tests only) | `gtool test karate` |
-| `component t` (pipeline) | `gtool test --stable` |
-
-### Full pipeline in one command
-```bash
-gtool test --stable
-```
-This runs, in order: start the STABLE mocks → launch the app's native binaries → run Karate → **always tear down app and mocks** (even if the tests fail or you Ctrl-C). Flags: `--tags`, `--build-config`, `--no-open`.
-
-### Step by step (equivalent, handy for debugging)
-```bash
-gtool services up --stable            # = component m
-gtool app start --native              # = component r  (needs the binaries in $GOPATH/bin)
-gtool test karate                     # = component e  (opens the HTML report when done)
-gtool app stop --native               # = component p
-gtool services down --stable          # stops the STABLE mocks
-```
-
-**Details of the reproduced contract:**
-- **STABLE mocks** — `postgresql` (`-p 5432`, mounts `test/component/mocks-data/postgresql` → `/data`), `pubsub` (`-p 9085`, env `PROJECT_ID` + `TOPICS` derived from the config), `mountebank` (`--net=host`, mounts `mocks-data/mountebank` → `/imposters`); fixed container names, `--init` and *skip-pull* if the image is already local.
-- **Native app** — launches `<repo>-<binary>` from `$GOPATH/bin` (binaries from `build-config.yml`) on ports `8080+`, with `CUSTOM_SERVER_ADDRESS=0.0.0.0:7080+` and `PUBSUB_EMULATOR_HOST` / `STORAGE_EMULATOR_HOST`.
-- **Karate** — runs `test-launcher-back:STABLE` on `--net=host`, mounts `test/component/features` → `/app/features` and writes the report to `test/component/reports`; when done it opens `karate-summary.html` (disable with `--no-open`).
-
-> The app binaries must be built in `$GOPATH/bin` before `--native` (e.g. `go build -o $GOPATH/bin/<repo>-<bin> ./cmd/...`).
 
 ---
 
@@ -187,7 +155,7 @@ third-party:
           subscription-ids: [my-sub]
 ```
 
-### `build-config.yml` — Go binaries and mocks (for `gtool unit` / `--native`)
+### `build-config.yml` — Go binaries and mocks (for `gtool unit`)
 ```yaml
 version: v5
 build:
@@ -223,7 +191,6 @@ graph TB
 ```
 
 - **Plugins** (`internal/plugin/`): `ServicePlugin` (mocks), `AppLauncher`, `TestExecutor`, registered in a thread-safe `PluginRegistry`.
-- **DIA compat**: `internal/core/mock/stablemocks` (`--stable`), `internal/core/app/nativeapp` (`--native`), `internal/core/test/stablekarate` (`gtool test karate`).
 - **Typed errors** (`pkg/errors`) and **structured logging** with Zap (`pkg/logger`).
 
 ---
@@ -251,7 +218,7 @@ go test -tags=integration ./internal/plugin/services/...
 
 ## 📦 Status
 
-Functional end-to-end pipeline: 6 mock plugins, app launcher (Docker and native), Karate runner and orchestration with guaranteed teardown. Compatibility with the DIA flow (`go-tool`/`component`) via opt-in paths. 185 tests passing.
+Functional end-to-end pipeline: 10 mock plugins, app launcher (Docker and native), Karate runner and orchestration with guaranteed teardown. 185 tests passing.
 
 | Phase | Status |
 |------|--------|

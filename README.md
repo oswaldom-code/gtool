@@ -7,7 +7,7 @@
 [![Go Version](https://img.shields.io/badge/go-1.24+-00ADD8?logo=go)](https://go.dev/)
 ![Tests](https://img.shields.io/badge/tests-185%20passing-success)
 ![Pipeline](https://img.shields.io/badge/pipeline-functional-success)
-[![License](https://img.shields.io/badge/license-TBD-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
 **A Go CLI to orchestrate microservice component tests: spin up mocks, launch the app, run the tests and clean everything up — with a single command.**
 
@@ -213,6 +213,14 @@ Integration tests (require Docker) per plugin:
 ```bash
 go test -tags=integration ./internal/plugin/services/...
 ```
+
+---
+
+## ⚠️ Known limitations
+
+- **App→mock networking on Linux (native `gtool test`).** The default pipeline runs the app as a bridge-network container while the mocks publish their ports on the host, so a containerized app cannot reach a mock at `localhost`. It needs a host gateway (`host.docker.internal`, automatic on Docker Desktop, manual on Linux) or a shared Docker network. The `--stable` / `--native` path avoids this by running the app as native processes that reach the mocks over `127.0.0.1` (mountebank runs on the host network).
+- **Newer mock plugins are lightly tested.** `redis`, `mongodb`, `mysql` and `minio` currently have unit tests only — no Docker integration tests yet. Treat them as experimental.
+- **Karate result is exit-code based.** Pass/fail comes from the launcher's exit code; there is no per-scenario parsing of the `karate-reports` output.
 
 ---
 

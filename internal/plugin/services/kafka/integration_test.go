@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/oswaldo-montano/gtool/internal/infra/docker"
-	"github.com/oswaldo-montano/gtool/pkg/logger"
+	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	"github.com/oswaldom-code/gtool/pkg/logger"
 )
 
 func TestKafkaIntegration(t *testing.T) {

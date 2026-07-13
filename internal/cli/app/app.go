@@ -9,13 +9,13 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	coreApp "github.com/oswaldo-montano/gtool/internal/core/app"
-	"github.com/oswaldo-montano/gtool/internal/core/app/nativeapp"
-	coreConfig "github.com/oswaldo-montano/gtool/internal/core/config"
-	"github.com/oswaldo-montano/gtool/internal/infra/docker"
-	"github.com/oswaldo-montano/gtool/internal/plugin"
-	"github.com/oswaldo-montano/gtool/pkg/config"
-	"github.com/oswaldo-montano/gtool/pkg/logger"
+	coreApp "github.com/oswaldom-code/gtool/internal/core/app"
+	"github.com/oswaldom-code/gtool/internal/core/app/nativeapp"
+	coreConfig "github.com/oswaldom-code/gtool/internal/core/config"
+	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/pkg/config"
+	"github.com/oswaldom-code/gtool/pkg/logger"
 )
 
 var (

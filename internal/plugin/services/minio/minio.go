@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types"
-	"github.com/oswaldo-montano/gtool/internal/infra/docker"
-	"github.com/oswaldo-montano/gtool/internal/plugin"
-	gtErrors "github.com/oswaldo-montano/gtool/pkg/errors"
+	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	"github.com/oswaldom-code/gtool/internal/plugin"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
 

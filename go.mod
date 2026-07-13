@@ -1,4 +1,4 @@
-module github.com/oswaldo-montano/gtool
+module github.com/oswaldom-code/gtool
 
 go 1.24.9
 

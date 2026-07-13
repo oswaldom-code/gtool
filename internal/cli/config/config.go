@@ -7,8 +7,8 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	coreConfig "github.com/oswaldo-montano/gtool/internal/core/config"
-	"github.com/oswaldo-montano/gtool/pkg/config"
+	coreConfig "github.com/oswaldom-code/gtool/internal/core/config"
+	"github.com/oswaldom-code/gtool/pkg/config"
 )
 
 // NewConfigCmd creates the config command

@@ -10,12 +10,12 @@ import (
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
-	"github.com/oswaldo-montano/gtool/internal/cli/app"
-	"github.com/oswaldo-montano/gtool/internal/cli/config"
-	"github.com/oswaldo-montano/gtool/internal/cli/generate"
-	"github.com/oswaldo-montano/gtool/internal/cli/services"
-	"github.com/oswaldo-montano/gtool/internal/cli/test"
-	"github.com/oswaldo-montano/gtool/internal/cli/unit"
+	"github.com/oswaldom-code/gtool/internal/cli/app"
+	"github.com/oswaldom-code/gtool/internal/cli/config"
+	"github.com/oswaldom-code/gtool/internal/cli/generate"
+	"github.com/oswaldom-code/gtool/internal/cli/services"
+	"github.com/oswaldom-code/gtool/internal/cli/test"
+	"github.com/oswaldom-code/gtool/internal/cli/unit"
 )
 
 var (

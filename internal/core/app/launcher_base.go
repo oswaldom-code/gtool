@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/oswaldo-montano/gtool/internal/infra/process"
-	"github.com/oswaldo-montano/gtool/internal/plugin"
-	gtErrors "github.com/oswaldo-montano/gtool/pkg/errors"
+	"github.com/oswaldom-code/gtool/internal/infra/process"
+	"github.com/oswaldom-code/gtool/internal/plugin"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
 

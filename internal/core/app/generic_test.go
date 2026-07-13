@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/oswaldo-montano/gtool/internal/infra/process"
-	"github.com/oswaldo-montano/gtool/internal/plugin"
-	gtErrors "github.com/oswaldo-montano/gtool/pkg/errors"
+	"github.com/oswaldom-code/gtool/internal/infra/process"
+	"github.com/oswaldom-code/gtool/internal/plugin"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 // writeScript creates an executable shell script running body and returns its path.

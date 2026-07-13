@@ -19,7 +19,7 @@ import (
 	"github.com/docker/go-connections/nat"
 	"go.uber.org/zap"
 
-	gtErrors "github.com/oswaldo-montano/gtool/pkg/errors"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 type Client struct {

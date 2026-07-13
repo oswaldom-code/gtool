@@ -3,18 +3,18 @@ package services
 import (
 	"go.uber.org/zap"
 
-	"github.com/oswaldo-montano/gtool/internal/infra/docker"
-	"github.com/oswaldo-montano/gtool/internal/plugin"
-	"github.com/oswaldo-montano/gtool/internal/plugin/services/couchbase"
-	"github.com/oswaldo-montano/gtool/internal/plugin/services/gcs"
-	"github.com/oswaldo-montano/gtool/internal/plugin/services/kafka"
-	"github.com/oswaldo-montano/gtool/internal/plugin/services/minio"
-	"github.com/oswaldo-montano/gtool/internal/plugin/services/mongodb"
-	"github.com/oswaldo-montano/gtool/internal/plugin/services/mountebank"
-	"github.com/oswaldo-montano/gtool/internal/plugin/services/mysql"
-	"github.com/oswaldo-montano/gtool/internal/plugin/services/postgresql"
-	"github.com/oswaldo-montano/gtool/internal/plugin/services/pubsub"
-	"github.com/oswaldo-montano/gtool/internal/plugin/services/redis"
+	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/couchbase"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/gcs"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/kafka"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/minio"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/mongodb"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/mountebank"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/mysql"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/postgresql"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/pubsub"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/redis"
 )
 
 func RegisterAll(registry *plugin.Registry, dockerClient *docker.Client, logger *zap.Logger) error {

@@ -3,7 +3,7 @@ package test
 import (
 	"context"
 
-	"github.com/oswaldo-montano/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/internal/plugin"
 )
 
 type Manager struct {

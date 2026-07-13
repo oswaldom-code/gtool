@@ -133,10 +133,10 @@ Examples:
   gtool s up postgresql              # Start only PostgreSQL
   gtool s up postgresql kafka        # Start PostgreSQL and Kafka
   gtool s up --config my-config.yml  # Use specific config file
-  gtool s up --stable                # Reproduce legacy "component m" with STABLE images`,
+  gtool s up --stable                # Start the fixed-contract mocks seeded from test/component/mocks-data`,
 		RunE: runServicesUp,
 	}
-	cmd.Flags().BoolVar(&stableMode, "stable", false, "use the legacy DIA STABLE mock images and contract (like 'component m')")
+	cmd.Flags().BoolVar(&stableMode, "stable", false, "use the fixed docker contract (public images, ports, mounts, seeding) for the component mocks")
 	return cmd
 }
 
@@ -152,10 +152,10 @@ Examples:
   gtool services down                # Stop all services
   gtool s down postgresql            # Stop only PostgreSQL
   gtool s down postgresql kafka      # Stop PostgreSQL and Kafka
-  gtool s down --stable              # Stop the legacy STABLE mock containers`,
+  gtool s down --stable              # Stop the fixed-contract mock containers`,
 		RunE: runServicesDown,
 	}
-	cmd.Flags().BoolVar(&stableMode, "stable", false, "stop the legacy DIA STABLE mock containers")
+	cmd.Flags().BoolVar(&stableMode, "stable", false, "stop the fixed-contract mock containers")
 	return cmd
 }
 

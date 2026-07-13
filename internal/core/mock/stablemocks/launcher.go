@@ -1,16 +1,15 @@
-// Package stablemocks reproduces the legacy DIA "component" tool's
-// prepare_mock_environment / stop_mock_environment steps: it launches the
-// private third-party STABLE mock images with the exact docker run contract
-// (network, ports, mounts, env, container names and log-based readiness) so
-// `gtool services up --stable` behaves like `component m`.
-//
-// This is a compatibility path for the STABLE images while they remain in use;
-// gtool's native plugins (public images) stay the default.
+// Package stablemocks launches the third-party mocks for the component pipeline
+// using the official public images for each tool, with a fixed docker run
+// contract (network, ports, mounts, container names and readiness) so
+// `gtool services up --stable` provides a reproducible mock environment that
+// seeds data from test/component/mocks-data.
 package stablemocks
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,10 +24,10 @@ import (
 )
 
 const (
-	// mocksArtifactRepo and dockerTag mirror the constants in the legacy
-	// component tool (MOCKS_ARTIFACT_REPO / DOCKER_TAG).
-	mocksArtifactRepo = "europe-southwest1-docker.pkg.dev/dia-com-cicd-pro/third-party-mocks"
-	dockerTag         = "STABLE"
+	// Official public images for each mocked tool.
+	postgresImage   = "postgres:16-alpine"
+	pubsubImage     = "gcr.io/google.com/cloudsdktool/cloud-sdk:emulators"
+	mountebankImage = "bbyars/mountebank:2.9.1"
 
 	pubsubMockPort = "9085"
 
@@ -36,8 +35,7 @@ const (
 	readyInterval = 3 * time.Second
 )
 
-// Supported lists the mocks this compatibility launcher can start. The other
-// legacy mocks (couchbase, kafka, gcs) are not ported to STABLE mode yet.
+// Supported lists the mocks this launcher can start.
 var Supported = []string{"postgresql", "pubsub", "mountebank"}
 
 // dockerClient is the subset of *docker.Client the launcher needs (kept small
@@ -50,15 +48,16 @@ type dockerClient interface {
 	RemoveContainerByName(ctx context.Context, name string) (bool, error)
 }
 
-// Launcher launches and stops the STABLE mock containers.
+// Launcher launches and stops the mock containers.
 type Launcher struct {
 	docker        dockerClient
 	logger        *zap.Logger
 	mocksDataPath string
+	httpDo        func(req *http.Request) (*http.Response, error)
 }
 
 // New builds a Launcher resolving the mocks-data directory from the working
-// directory, matching the legacy tool's $PWD/test/component/mocks-data.
+// directory ($PWD/test/component/mocks-data).
 func New(d dockerClient, logger *zap.Logger) (*Launcher, error) {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -71,21 +70,36 @@ func New(d dockerClient, logger *zap.Logger) (*Launcher, error) {
 		docker:        d,
 		logger:        logger,
 		mocksDataPath: filepath.Join(wd, "test", "component", "mocks-data"),
+		httpDo:        (&http.Client{Timeout: 10 * time.Second}).Do,
 	}, nil
+}
+
+// pubsubTopic is a topic and its subscriptions, created via the emulator REST
+// API once it is ready.
+type pubsubTopic struct {
+	name string
+	subs []string
 }
 
 type launchSpec struct {
 	name        string
 	image       string
 	networkMode string
+	entrypoint  []string
+	cmd         []string
 	ports       map[string]string // container port -> host port
 	mounts      []docker.Mount
 	env         []string
 	readyLogs   []string // every entry must be present in the logs to be ready
+	readyHTTP   string   // GET url that must return 200 to be ready
+
+	// pubsub-only: resources created over REST after readiness.
+	projectID string
+	topics    []pubsubTopic
 }
 
-// Up launches the given services (or all configured mocks) with the STABLE
-// contract and waits until each one is ready.
+// Up launches the given services (or all configured mocks), waits until each
+// one is ready and seeds any post-start resources.
 func (l *Launcher) Up(ctx context.Context, services []string, cfg *config.Config) error {
 	if len(services) == 0 {
 		services = cfg.ThirdParty.Mocks
@@ -104,7 +118,7 @@ func (l *Launcher) Up(ctx context.Context, services []string, cfg *config.Config
 	}
 
 	for _, spec := range specs {
-		fmt.Printf("🚀 Launching %s (STABLE)...\n", spec.name)
+		fmt.Printf("🚀 Launching %s...\n", spec.name)
 		if err := l.launchOne(ctx, spec); err != nil {
 			return err
 		}
@@ -115,13 +129,18 @@ func (l *Launcher) Up(ctx context.Context, services []string, cfg *config.Config
 		if err := l.waitReady(ctx, spec); err != nil {
 			return err
 		}
+		if len(spec.topics) > 0 {
+			if err := l.seedPubsub(ctx, spec); err != nil {
+				return err
+			}
+		}
 		fmt.Printf("✅ %s ready\n", spec.name)
 	}
 
 	return nil
 }
 
-// Down removes the fixed-name STABLE mock containers.
+// Down removes the fixed-name mock containers.
 func (l *Launcher) Down(ctx context.Context, services []string) error {
 	if len(services) == 0 {
 		services = Supported
@@ -150,6 +169,8 @@ func (l *Launcher) launchOne(ctx context.Context, spec *launchSpec) error {
 	cc := &docker.ContainerConfig{
 		Image:        spec.image,
 		Name:         spec.name,
+		Entrypoint:   spec.entrypoint,
+		Cmd:          spec.cmd,
 		Env:          spec.env,
 		PortBindings: spec.ports,
 		Mounts:       spec.mounts,
@@ -174,7 +195,10 @@ func (l *Launcher) launchOne(ctx context.Context, spec *launchSpec) error {
 }
 
 func (l *Launcher) waitReady(ctx context.Context, spec *launchSpec) error {
-	// Mountebank has no readiness log (legacy is_ready_mountebank returns 0).
+	if spec.readyHTTP != "" {
+		return l.waitHTTP(ctx, spec.readyHTTP)
+	}
+	// No readiness signal (e.g. mountebank loads its imposters at startup).
 	if len(spec.readyLogs) == 0 {
 		return nil
 	}
@@ -195,19 +219,42 @@ func (l *Launcher) waitReady(ctx context.Context, spec *launchSpec) error {
 		fmt.Sprintf("timeout waiting for %s to be ready", spec.name))
 }
 
-func (l *Launcher) specFor(name string, cfg *config.Config) (*launchSpec, error) {
-	image := fmt.Sprintf("%s/%s:%s", mocksArtifactRepo, name, dockerTag)
+func (l *Launcher) waitHTTP(ctx context.Context, url string) error {
+	do := l.httpClient()
+	for attempt := 0; attempt < readyAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to build readiness request")
+		}
+		if resp, err := do(req); err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(readyInterval):
+		}
+	}
+	return gtErrors.New(gtErrors.ErrServiceTimeout, fmt.Sprintf("timeout waiting for %s", url))
+}
 
+func (l *Launcher) specFor(name string, cfg *config.Config) (*launchSpec, error) {
 	switch name {
 	case "mountebank":
 		dir := filepath.Join(l.mocksDataPath, "mountebank")
 		if err := requireDir(dir); err != nil {
 			return nil, err
 		}
+
 		return &launchSpec{
 			name:        name,
-			image:       image,
+			image:       mountebankImage,
 			networkMode: "host",
+			entrypoint:  []string{"mb"},
+			cmd:         []string{"start", "--configfile", "/imposters/imposters.ejs", "--allowInjection"},
 			mounts:      []docker.Mount{{Type: "bind", Source: dir, Target: "/imposters"}},
 		}, nil
 
@@ -216,11 +263,12 @@ func (l *Launcher) specFor(name string, cfg *config.Config) (*launchSpec, error)
 		if err := requireSQLData(dir); err != nil {
 			return nil, err
 		}
+
 		return &launchSpec{
 			name:   name,
-			image:  image,
+			image:  postgresImage,
 			ports:  map[string]string{"5432": "5432"},
-			mounts: []docker.Mount{{Type: "bind", Source: dir, Target: "/data"}},
+			mounts: []docker.Mount{{Type: "bind", Source: dir, Target: "/docker-entrypoint-initdb.d", ReadOnly: true}},
 			env:    []string{"POSTGRES_PASSWORD=postgres"},
 			readyLogs: []string{
 				"PostgreSQL init process complete; ready for start up",
@@ -229,39 +277,88 @@ func (l *Launcher) specFor(name string, cfg *config.Config) (*launchSpec, error)
 		}, nil
 
 	case "pubsub":
-		projectID, topics, err := buildPubsubEnv(cfg)
+		projectID, topics, err := parsePubsub(cfg)
 		if err != nil {
 			return nil, err
 		}
 		return &launchSpec{
 			name:  name,
-			image: image,
-			ports: map[string]string{"8085": pubsubMockPort},
-			env: []string{
-				"PROJECT_ID=" + projectID,
-				"TOPICS=" + topics,
+			image: pubsubImage,
+			cmd: []string{
+				"gcloud", "beta", "emulators", "pubsub", "start",
+				"--host-port=0.0.0.0:8085",
+				"--project=" + projectID,
 			},
-			readyLogs: []string{"pubsub emulator running and ready"},
+			ports:     map[string]string{"8085": pubsubMockPort},
+			readyHTTP: fmt.Sprintf("http://localhost:%s/v1/projects/%s/topics", pubsubMockPort, projectID),
+			projectID: projectID,
+			topics:    topics,
 		}, nil
 
 	default:
 		return nil, gtErrors.New(gtErrors.ErrInvalidArgument,
-			fmt.Sprintf("%q is not supported in STABLE mode (supported: %s)", name, strings.Join(Supported, ", ")))
+			fmt.Sprintf("%q is not supported in stable mode (supported: %s)", name, strings.Join(Supported, ", ")))
 	}
 }
 
-// buildPubsubEnv reproduces the legacy TOPICS construction:
-// "<topic>[:<sub0>[&<sub1>...]]" entries joined by spaces.
-func buildPubsubEnv(cfg *config.Config) (projectID, topics string, err error) {
+// seedPubsub creates the configured topics and subscriptions over the emulator
+// REST API once it is serving requests.
+func (l *Launcher) seedPubsub(ctx context.Context, spec *launchSpec) error {
+	base := fmt.Sprintf("http://localhost:%s/v1/projects/%s", pubsubMockPort, spec.projectID)
+	for _, t := range spec.topics {
+		if err := l.putResource(ctx, fmt.Sprintf("%s/topics/%s", base, t.name), nil); err != nil {
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed,
+				fmt.Sprintf("failed to create topic %s", t.name))
+		}
+		for _, sub := range t.subs {
+			body := []byte(fmt.Sprintf(`{"topic":"projects/%s/topics/%s"}`, spec.projectID, t.name))
+			if err := l.putResource(ctx, fmt.Sprintf("%s/subscriptions/%s", base, sub), body); err != nil {
+				return gtErrors.Wrap(err, gtErrors.ErrServiceFailed,
+					fmt.Sprintf("failed to create subscription %s", sub))
+			}
+		}
+	}
+	return nil
+}
+
+func (l *Launcher) putResource(ctx context.Context, url string, body []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
+	if err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to build request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := l.httpClient()(req)
+	if err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict {
+		return gtErrors.New(gtErrors.ErrServiceFailed,
+			fmt.Sprintf("unexpected status %d for %s", resp.StatusCode, url))
+	}
+	return nil
+}
+
+func (l *Launcher) httpClient() func(*http.Request) (*http.Response, error) {
+	if l.httpDo != nil {
+		return l.httpDo
+	}
+	return http.DefaultClient.Do
+}
+
+// parsePubsub reads the pubsub mock-config into a project id and its topics.
+func parsePubsub(cfg *config.Config) (string, []pubsubTopic, error) {
 	raw, ok := cfg.ThirdParty.MockConfig["pubsub"]
 	if !ok || raw == nil {
-		return "", "", gtErrors.New(gtErrors.ErrConfigInvalid,
-			"pubsub mock-config is required to use the pubsub STABLE mock")
+		return "", nil, gtErrors.New(gtErrors.ErrConfigInvalid,
+			"pubsub mock-config is required to use the pubsub mock")
 	}
 
 	data, err := yaml.Marshal(raw)
 	if err != nil {
-		return "", "", gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to encode pubsub config")
+		return "", nil, gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to encode pubsub config")
 	}
 
 	var pc struct {
@@ -272,26 +369,17 @@ func buildPubsubEnv(cfg *config.Config) (projectID, topics string, err error) {
 		} `yaml:"topics"`
 	}
 	if err := yaml.Unmarshal(data, &pc); err != nil {
-		return "", "", gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to parse pubsub config")
+		return "", nil, gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to parse pubsub config")
 	}
 	if pc.ProjectID == "" {
-		return "", "", gtErrors.New(gtErrors.ErrConfigInvalid, "pubsub mock-config requires project-id")
+		return "", nil, gtErrors.New(gtErrors.ErrConfigInvalid, "pubsub mock-config requires project-id")
 	}
 
-	entries := make([]string, 0, len(pc.Topics))
+	topics := make([]pubsubTopic, 0, len(pc.Topics))
 	for _, t := range pc.Topics {
-		entry := t.TopicID
-		for i, sub := range t.SubscriptionIDs {
-			if i == 0 {
-				entry += ":" + sub
-			} else {
-				entry += "&" + sub
-			}
-		}
-		entries = append(entries, entry)
+		topics = append(topics, pubsubTopic{name: t.TopicID, subs: t.SubscriptionIDs})
 	}
-
-	return pc.ProjectID, strings.Join(entries, " "), nil
+	return pc.ProjectID, topics, nil
 }
 
 func containsAll(haystack string, needles []string) bool {

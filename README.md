@@ -1,5 +1,7 @@
 # GTOOL - Component Testing Orchestrator
 
+> 🌐 **Language:** English · [Español](docs/readme/README.es.md)
+
 <div align="center">
 
 [![Go Version](https://img.shields.io/badge/go-1.24+-00ADD8?logo=go)](https://go.dev/)
@@ -7,20 +9,20 @@
 ![Pipeline](https://img.shields.io/badge/pipeline-functional-success)
 [![License](https://img.shields.io/badge/license-TBD-blue)](LICENSE)
 
-**CLI en Go para orquestar pruebas de componente de microservicios: levanta mocks, lanza la app, corre los tests y limpia todo — con un solo comando.**
+**A Go CLI to orchestrate microservice component tests: spin up mocks, launch the app, run the tests and clean everything up — with a single command.**
 
 </div>
 
 ---
 
-## 🎯 Qué hace GTOOL
+## 🎯 What GTOOL does
 
 ```mermaid
 graph LR
     A[🔧 Mocks] --> B[🚀 App]
-    B --> C[🧪 Tests Karate]
-    C --> D[📊 Reporte HTML]
-    D --> E[🧹 Limpieza]
+    B --> C[🧪 Karate Tests]
+    C --> D[📊 HTML Report]
+    D --> E[🧹 Cleanup]
 
     style A fill:#4fc3f7
     style B fill:#66bb6a
@@ -29,77 +31,77 @@ graph LR
     style E fill:#ef5350
 ```
 
-GTOOL reemplaza las herramientas bash internas `go-tool` (tests unitarios/build) y `component` (tests de componente) por un único binario en Go, tipado y con logs estructurados. Automatiza:
+GTOOL replaces the internal bash tools `go-tool` (unit tests/build) and `component` (component tests) with a single Go binary — typed and with structured logging. It automates:
 
-1. **Mocks** — levanta servicios de terceros en Docker (PostgreSQL, Pub/Sub, Mountebank, Kafka, Couchbase, GCS).
-2. **App** — lanza el microservicio bajo prueba (imagen Docker o binarios nativos).
-3. **Tests** — ejecuta el suite Karate (backend) contra la app y los mocks.
-4. **Reporte** — genera el reporte HTML de Karate y puede abrirlo en el navegador.
-5. **Limpieza** — derriba app y mocks siempre, incluso ante fallos o Ctrl-C.
+1. **Mocks** — starts third-party services in Docker (PostgreSQL, Pub/Sub, Mountebank, Kafka, Couchbase, GCS).
+2. **App** — launches the microservice under test (Docker image or native binaries).
+3. **Tests** — runs the Karate suite (backend) against the app and the mocks.
+4. **Report** — generates the Karate HTML report and can open it in the browser.
+5. **Cleanup** — always tears down app and mocks, even on failures or Ctrl-C.
 
 ---
 
-## 🚀 Instalación
+## 🚀 Installation
 
 ```bash
 git clone <repo-url> && cd gtool
 
-make build              # compila ./bin/gtool
-./bin/gtool version     # verifica
+make build              # builds ./bin/gtool
+./bin/gtool version     # verify
 
-make install            # copia el binario a $GOPATH/bin
+make install            # copies the binary to $GOPATH/bin
 ```
 
-> ⚠️ **`make install` copia a `$GOPATH/bin` (`~/go/bin`).** Si tu terminal no encuentra `gtool` tras instalar, ese directorio no está en tu `PATH`. Agrégalo:
+> ⚠️ **`make install` copies to `$GOPATH/bin` (`~/go/bin`).** If your terminal can't find `gtool` after installing, that directory is not on your `PATH`. Add it:
 > ```bash
-> echo 'export PATH="$PATH:$GOPATH/bin"' >> ~/.zshrc   # o ~/.bashrc
+> echo 'export PATH="$PATH:$GOPATH/bin"' >> ~/.zshrc   # or ~/.bashrc
 > source ~/.zshrc && rehash
 > ```
 
-**Requisitos:** Go 1.24+, Docker, Make.
+**Requirements:** Go 1.24+, Docker, Make.
 
 ---
 
 ## ⚡ Quick Start
 
 ```bash
-# 1. Validar la configuración del repo
+# 1. Validate the repo configuration
 gtool config validate --config component-config.yml
 
-# 2. Levantar solo los mocks
+# 2. Start the mocks only
 gtool services up
 gtool services status
 gtool services down
 
-# 3. Pipeline completo (mocks → app → tests → limpieza)
+# 3. Full pipeline (mocks → app → tests → cleanup)
 gtool test
 ```
 
-GTOOL busca por defecto `./component-config.yml`. Usa `--config <archivo>` para otro.
+GTOOL looks for `./component-config.yml` by default. Use `--config <file>` for another one.
 
 ---
 
-## 📖 Comandos
+## 📖 Commands
 
-Todos los comandos aceptan `--config <archivo>`, `--log-level debug|info|warn|error` y `--verbose`.
+Every command accepts `--config <file>`, `--log-level debug|info|warn|error` and `--verbose`.
 
-### `gtool config` — configuración
+### `gtool config` — configuration
 ```bash
-gtool config validate --config component-config.yml   # valida el esquema
-gtool config show --format yaml                        # imprime la config resuelta
+gtool config validate --config component-config.yml   # validates the schema
+gtool config show --format yaml                        # prints the resolved config
 gtool config show --format json
 ```
 
-### `gtool services` (alias `s`) — mocks de terceros
+### `gtool services` (alias `s`) — third-party mocks
 ```bash
-gtool services up                     # levanta todos los mocks de la config
-gtool s up postgresql kafka           # levanta servicios específicos
-gtool s status                        # estado de los servicios
-gtool s logs postgresql               # logs de un servicio
-gtool s down                          # detiene todos
+gtool services up                     # starts every mock in the config
+gtool s up postgresql kafka           # starts specific services
+gtool s status                        # services status
+gtool s logs postgresql               # logs of a service
+gtool s down                          # stops all
 ```
 
-### `gtool app` — aplicación bajo prueba
+### `gtool app` — application under test
 ```bash
 gtool app start --docker-image myapp:latest --port 8080
 gtool app status
@@ -107,70 +109,70 @@ gtool app logs --tail 100
 gtool app stop
 ```
 
-### `gtool unit` (alias `u`) — tests unitarios
-Reproduce `go-tool u`: genera los mocks de `build-config.yml` (mockgen) y corre el suite con Ginkgo, dejando cobertura y reporte JUnit en `./coverage`.
+### `gtool unit` (alias `u`) — unit tests
+Reproduces `go-tool u`: generates the mocks from `build-config.yml` (mockgen) and runs the suite with Ginkgo, leaving coverage and the JUnit report in `./coverage`.
 ```bash
 gtool unit
-gtool unit --skip-mocks               # solo corre los tests
+gtool unit --skip-mocks               # runs the tests only
 gtool unit --build-config build-config.yml
 ```
 
-### `gtool test` — pipeline de componente
+### `gtool test` — component pipeline
 ```bash
-gtool test                            # pipeline nativo de gtool (imágenes públicas)
-gtool test karate                     # solo Karate (mocks y app ya levantados)
+gtool test                            # gtool-native pipeline (public images)
+gtool test karate                     # Karate only (mocks and app already up)
 gtool test karate --tags "@smoke" --no-open
 ```
 
 ### `gtool generate` / `gtool version`
 ```bash
-gtool generate config                 # genera un component-config.yml de ejemplo
+gtool generate config                 # generates a sample component-config.yml
 gtool version
 ```
 
 ---
 
-## 🔁 Reproducir el flujo DIA (`go-tool` / `component`)
+## 🔁 Reproducing the DIA flow (`go-tool` / `component`)
 
-Para repos que hoy usan las herramientas bash internas, GTOOL reproduce su comportamiento usando las **imágenes STABLE** privadas y el contrato exacto (red, puertos, montajes, env). Estas rutas son **opt-in** (`--stable`, `--native`) y no alteran el comportamiento nativo de gtool ni el `component-config.yml`.
+For repos that currently use the internal bash tools, GTOOL reproduces their behavior using the private **STABLE images** and the exact contract (network, ports, mounts, env). These paths are **opt-in** (`--stable`, `--native`) and do not alter gtool's native behavior or the `component-config.yml`.
 
-| Herramienta DIA | Equivalente en GTOOL |
+| DIA tool | GTOOL equivalent |
 |-----------------|----------------------|
 | `go-tool u` | `gtool unit` |
 | `component m` (mocks) | `gtool services up --stable` |
 | `component r` / `p` (app) | `gtool app start --native` / `gtool app stop --native` |
-| `component e` (solo tests) | `gtool test karate` |
+| `component e` (tests only) | `gtool test karate` |
 | `component t` (pipeline) | `gtool test --stable` |
 
-### Pipeline completo en un comando
+### Full pipeline in one command
 ```bash
 gtool test --stable
 ```
-Esto, en orden: levanta los mocks STABLE → lanza los binarios nativos de la app → corre Karate → **derriba app y mocks siempre** (incluso si los tests fallan o haces Ctrl-C). Flags: `--tags`, `--build-config`, `--no-open`.
+This runs, in order: start the STABLE mocks → launch the app's native binaries → run Karate → **always tear down app and mocks** (even if the tests fail or you Ctrl-C). Flags: `--tags`, `--build-config`, `--no-open`.
 
-### Paso a paso (equivalente, útil para depurar)
+### Step by step (equivalent, handy for debugging)
 ```bash
 gtool services up --stable            # = component m
-gtool app start --native              # = component r  (necesita los binarios en $GOPATH/bin)
-gtool test karate                     # = component e  (abre el reporte HTML al terminar)
+gtool app start --native              # = component r  (needs the binaries in $GOPATH/bin)
+gtool test karate                     # = component e  (opens the HTML report when done)
 gtool app stop --native               # = component p
-gtool services down --stable          # detiene los mocks STABLE
+gtool services down --stable          # stops the STABLE mocks
 ```
 
-**Detalles del contrato reproducido:**
-- **Mocks STABLE** — `postgresql` (`-p 5432`, monta `test/component/mocks-data/postgresql` → `/data`), `pubsub` (`-p 9085`, env `PROJECT_ID` + `TOPICS` derivados de la config), `mountebank` (`--net=host`, monta `mocks-data/mountebank` → `/imposters`); nombres de contenedor fijos, `--init` y *skip-pull* si la imagen ya está local.
-- **App nativa** — lanza `<repo>-<binario>` desde `$GOPATH/bin` (binarios de `build-config.yml`) en puertos `8080+`, con `CUSTOM_SERVER_ADDRESS=0.0.0.0:7080+` y `PUBSUB_EMULATOR_HOST` / `STORAGE_EMULATOR_HOST`.
-- **Karate** — corre `test-launcher-back:STABLE` en `--net=host`, monta `test/component/features` → `/app/features` y escribe el reporte en `test/component/reports`; al terminar abre `karate-summary.html` (desactiva con `--no-open`).
+**Details of the reproduced contract:**
+- **STABLE mocks** — `postgresql` (`-p 5432`, mounts `test/component/mocks-data/postgresql` → `/data`), `pubsub` (`-p 9085`, env `PROJECT_ID` + `TOPICS` derived from the config), `mountebank` (`--net=host`, mounts `mocks-data/mountebank` → `/imposters`); fixed container names, `--init` and *skip-pull* if the image is already local.
+- **Native app** — launches `<repo>-<binary>` from `$GOPATH/bin` (binaries from `build-config.yml`) on ports `8080+`, with `CUSTOM_SERVER_ADDRESS=0.0.0.0:7080+` and `PUBSUB_EMULATOR_HOST` / `STORAGE_EMULATOR_HOST`.
+- **Karate** — runs `test-launcher-back:STABLE` on `--net=host`, mounts `test/component/features` → `/app/features` and writes the report to `test/component/reports`; when done it opens `karate-summary.html` (disable with `--no-open`).
 
-> Los binarios de la app deben estar compilados en `$GOPATH/bin` antes de `--native` (p. ej. `go build -o $GOPATH/bin/<repo>-<bin> ./cmd/...`).
+> The app binaries must be built in `$GOPATH/bin` before `--native` (e.g. `go build -o $GOPATH/bin/<repo>-<bin> ./cmd/...`).
 
 ---
 
-## 🧩 Configuración
+## 🧩 Configuration
 
-GTOOL usa dos archivos (extensión `.yml` preferida; `.yaml` soportado):
+GTOOL uses two files (`.yml` extension preferred; `.yaml` supported):
 
-### `component-config.yml` — pipeline de componente
+### `component-config.yml` — component pipeline
 ```yaml
 version: v1
 app-technology: golang            # golang | nodejs | generic
@@ -185,7 +187,7 @@ third-party:
           subscription-ids: [my-sub]
 ```
 
-### `build-config.yml` — binarios y mocks de Go (para `gtool unit` / `--native`)
+### `build-config.yml` — Go binaries and mocks (for `gtool unit` / `--native`)
 ```yaml
 version: v5
 build:
@@ -199,11 +201,11 @@ mocks:
 
 ---
 
-## 🏗️ Arquitectura
+## 🏗️ Architecture
 
 ```mermaid
 graph TB
-    User[👤 Usuario] --> CLI[CLI - Cobra]
+    User[👤 User] --> CLI[CLI - Cobra]
     CLI --> Orch[Orchestrator]
     Orch --> Mock[Mock Manager]
     Orch --> App[App Launcher]
@@ -220,45 +222,44 @@ graph TB
     style Test fill:#4fc3f7
 ```
 
-- **Plugins** (`internal/plugin/`): `ServicePlugin` (mocks), `AppLauncher`, `TestExecutor`, registrados en un `PluginRegistry` thread-safe.
-- **Compat DIA**: `internal/core/mock/stablemocks` (`--stable`), `internal/core/app/nativeapp` (`--native`), `internal/core/test/stablekarate` (`gtool test karate`).
-- **Errores tipados** (`pkg/errors`) y **logging estructurado** con Zap (`pkg/logger`).
+- **Plugins** (`internal/plugin/`): `ServicePlugin` (mocks), `AppLauncher`, `TestExecutor`, registered in a thread-safe `PluginRegistry`.
+- **DIA compat**: `internal/core/mock/stablemocks` (`--stable`), `internal/core/app/nativeapp` (`--native`), `internal/core/test/stablekarate` (`gtool test karate`).
+- **Typed errors** (`pkg/errors`) and **structured logging** with Zap (`pkg/logger`).
 
 ---
 
-## 🛠️ Desarrollo
+## 🛠️ Development
 
 ```bash
-make build          # compila ./bin/gtool
-make test           # tests con -race
-make test-coverage  # reporte HTML de cobertura
+make build          # builds ./bin/gtool
+make test           # tests with -race
+make test-coverage  # HTML coverage report
 make lint           # golangci-lint
 make fmt            # gofmt + goimports
-make clean          # limpia artefactos
-make help           # lista todos los targets
+make clean          # cleans artifacts
+make help           # lists every target
 ```
 
-**Estándares:** mínimo 80% de cobertura para código nuevo (95%+ en config/orquestación), tests table-driven, errores de `pkg/errors`, conventional commits. Ver [CLAUDE.md](CLAUDE.md).
+**Standards:** minimum 80% coverage for new code (95%+ for config/orchestration), table-driven tests, errors from `pkg/errors`, conventional commits. See [CLAUDE.md](CLAUDE.md).
 
-Tests de integración (requieren Docker) por plugin:
+Integration tests (require Docker) per plugin:
 ```bash
 go test -tags=integration ./internal/plugin/services/...
 ```
 
 ---
 
-## 📦 Estado
+## 📦 Status
 
-Pipeline funcional end-to-end: 6 plugins de mock, lanzador de app (Docker y nativo), runner Karate y orquestación con teardown garantizado. Compatibilidad con el flujo DIA (`go-tool`/`component`) vía rutas opt-in. 185 tests en verde.
+Functional end-to-end pipeline: 6 mock plugins, app launcher (Docker and native), Karate runner and orchestration with guaranteed teardown. Compatibility with the DIA flow (`go-tool`/`component`) via opt-in paths. 185 tests passing.
 
-| Fase | Estado |
+| Phase | Status |
 |------|--------|
-| 1. Fundamentos (CLI, config, plugins, errores, logging) | ✅ |
+| 1. Foundation (CLI, config, plugins, errors, logging) | ✅ |
 | 2. Mocks (6 plugins) | ✅ |
-| 3. App Launcher (Docker + nativo) | ✅ |
+| 3. App Launcher (Docker + native) | ✅ |
 | 4. Test Executor (Karate) | ✅ |
-| 5. Orquestación (pipeline + teardown) | ✅ |
-| 6–7. Features avanzadas, docs/release | 🔄 |
+| 5. Orchestration (pipeline + teardown) | ✅ |
+| 6–7. Advanced features, docs/release | 🔄 |
 
 ---
-

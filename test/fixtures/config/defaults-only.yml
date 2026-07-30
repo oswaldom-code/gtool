@@ -1,0 +1,3 @@
+version: v1
+app-technology: golang
+test-launcher: test-launcher-back

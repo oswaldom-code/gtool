@@ -1,0 +1,35 @@
+version: v1
+app-technology: nodejs
+app-config:
+  binary-name: my-service
+  binary-path: ./dist
+  docker-image: myapp:latest
+  port: 3000
+  environment:
+    NODE_ENV: test
+    LOG_LEVEL: debug
+test-launcher: test-launcher-front
+test-config:
+  tags: "@smoke"
+  features-path: ./features
+  reports-path: ./reports
+  parallel: true
+third-party:
+  mocks:
+    - couchbase
+    - postgresql
+  mock-config:
+    couchbase:
+      bucket: test-bucket
+orchestration:
+  parallel-mocks: false
+  startup-timeout: 60s
+  health-check-interval: 5s
+  health-check-retries: 30
+  cleanup-on-failure: false
+  preserve-logs: false
+observability:
+  structured-logs: true
+  log-level: debug
+  metrics-enabled: false
+  report-format: json

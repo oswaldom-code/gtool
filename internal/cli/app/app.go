@@ -135,7 +135,7 @@ func newLogsCmd() *cobra.Command {
 func runStart(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
 	log := logger.Default()
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	if nativeMode {
 		launcher, err := nativeapp.New(log.Logger, buildConfigFile)
@@ -158,7 +158,7 @@ func runStart(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	appConfig := buildAppConfig(cfg)
 	fmt.Printf("🚀 Starting application (%s)...\n", appConfig.DockerImage)
@@ -174,7 +174,7 @@ func runStart(_ *cobra.Command, _ []string) error {
 func runStop(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
 	log := logger.Default()
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	if nativeMode {
 		launcher, err := nativeapp.New(log.Logger, buildConfigFile)
@@ -188,7 +188,7 @@ func runStop(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	fmt.Println("🛑 Stopping application...")
 	if err := deps.manager.Stop(ctx); err != nil {
@@ -202,7 +202,7 @@ func runStop(_ *cobra.Command, _ []string) error {
 func runRestart(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
 	log := logger.Default()
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
@@ -213,7 +213,7 @@ func runRestart(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	fmt.Println("🔄 Restarting application...")
 	if err := deps.manager.Restart(ctx, buildAppConfig(cfg)); err != nil {
@@ -232,7 +232,7 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	status, err := deps.manager.Status(ctx)
 	if err != nil {
@@ -240,8 +240,8 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "STATUS\tIMAGE\tPORT")
-	fmt.Fprintln(w, "------\t-----\t----")
+	_, _ = fmt.Fprintln(w, "STATUS\tIMAGE\tPORT")
+	_, _ = fmt.Fprintln(w, "------\t-----\t----")
 
 	state := status.State
 	if status.Running {
@@ -255,7 +255,7 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	if status.Port > 0 {
 		port = fmt.Sprintf("%d", status.Port)
 	}
-	fmt.Fprintf(w, "%s\t%s\t%s\n", state, image, port)
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", state, image, port)
 	return w.Flush()
 }
 
@@ -267,7 +267,7 @@ func runLogs(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	logs, err := deps.manager.Logs(ctx, logsTail)
 	if err != nil {

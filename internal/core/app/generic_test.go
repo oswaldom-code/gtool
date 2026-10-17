@@ -82,7 +82,7 @@ func TestGenericLauncher_IsReady_NoPort(t *testing.T) {
 	ctx := context.Background()
 	g := newLauncher()
 	require.NoError(t, g.Launch(ctx, &plugin.AppConfig{BinaryPath: writeScript(t, "sleep 30")}))
-	defer g.Stop(ctx)
+	defer func() { assert.NoError(t, g.Stop(ctx)) }()
 
 	ready, err := g.IsReady(ctx)
 	require.NoError(t, err)
@@ -112,7 +112,7 @@ func TestGenericLauncher_IsReady_PortProbe(t *testing.T) {
 		BinaryPath: writeScript(t, "sleep 30"),
 		Port:       port,
 	}))
-	defer g.Stop(ctx)
+	defer func() { assert.NoError(t, g.Stop(ctx)) }()
 
 	ready, err := g.IsReady(ctx)
 	require.NoError(t, err)
@@ -138,7 +138,7 @@ func TestGenericLauncher_Restart(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, g.Restart(ctx))
-	defer g.Stop(ctx)
+	defer func() { assert.NoError(t, g.Stop(ctx)) }()
 
 	pid2, err := g.GetPID()
 	require.NoError(t, err)

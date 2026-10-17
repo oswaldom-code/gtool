@@ -138,13 +138,13 @@ Bring the environment up first with:
 func runKarate(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
 	log := logger.Default()
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	dockerClient, err := docker.NewClient(log.Logger)
 	if err != nil {
 		return fmt.Errorf("failed to create Docker client: %w", err)
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 	if err := dockerClient.Ping(ctx); err != nil {
 		return fmt.Errorf("docker daemon not available: %w", err)
 	}
@@ -178,7 +178,7 @@ func configFilePath() string {
 
 func runTest(_ *cobra.Command, _ []string) error {
 	log := logger.Default()
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	// Cancel the pipeline on Ctrl-C / SIGTERM; the orchestrator still tears down.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -197,7 +197,7 @@ func runTest(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	fmt.Println("🧪 Running component test pipeline...")
 	result, runErr := deps.pipeline.Run(ctx)
@@ -223,7 +223,7 @@ func runStableTest(ctx context.Context, log *zap.Logger, cfg *config.Config) err
 	if err != nil {
 		return fmt.Errorf("failed to create Docker client: %w", err)
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 	if err := dockerClient.Ping(ctx); err != nil {
 		return fmt.Errorf("docker daemon not available: %w", err)
 	}

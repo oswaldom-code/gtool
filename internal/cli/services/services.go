@@ -203,7 +203,7 @@ Examples:
 func runServicesUp(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	log := logger.Default()
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
@@ -218,7 +218,7 @@ func runServicesUp(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	if err := deps.ping(ctx); err != nil {
 		return fmt.Errorf("docker daemon not available: %w", err)
@@ -269,7 +269,7 @@ func runServicesUp(cmd *cobra.Command, args []string) error {
 func runServicesDown(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	log := logger.Default()
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
@@ -284,7 +284,7 @@ func runServicesDown(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	mockManager := deps.manager
 	servicesToStop := args
@@ -329,7 +329,7 @@ func runServicesStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	mockManager := deps.manager
 
@@ -341,8 +341,8 @@ func runServicesStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "SERVICE\tSTATUS\tUPTIME\tPORT")
-	fmt.Fprintln(w, "-------\t------\t------\t----")
+	_, _ = fmt.Fprintln(w, "SERVICE\tSTATUS\tUPTIME\tPORT")
+	_, _ = fmt.Fprintln(w, "-------\t------\t------\t----")
 
 	for _, status := range statuses {
 		uptimeStr := "-"
@@ -357,21 +357,20 @@ func runServicesStatus(cmd *cobra.Command, args []string) error {
 
 		statusIcon := "●"
 		statusColor := status.Status
-		if status.Status == "running" {
+		switch status.Status {
+		case "running":
 			statusColor = "running ✓"
-		} else if status.Status == "stopped" {
+		case "stopped":
 			statusColor = "stopped ●"
-		} else if status.Status == "error" {
+		case "error":
 			statusColor = "error ✗"
 		}
 
-		fmt.Fprintf(w, "%s\t%s %s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s %s\t%s\t%s\n",
 			status.Name, statusIcon, statusColor, uptimeStr, portStr)
 	}
 
-	w.Flush()
-
-	return nil
+	return w.Flush()
 }
 
 func runServicesLogs(cmd *cobra.Command, args []string) error {
@@ -391,7 +390,7 @@ func runServicesLogs(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	mockManager := deps.manager
 
@@ -465,7 +464,7 @@ func runStableUp(ctx context.Context, log *zap.Logger, args []string, cfg *confi
 	if err != nil {
 		return err
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 
 	if err := launcher.Up(ctx, args, cfg); err != nil {
 		return err
@@ -480,7 +479,7 @@ func runStableDown(ctx context.Context, log *zap.Logger, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 
 	if err := launcher.Down(ctx, args); err != nil {
 		return err

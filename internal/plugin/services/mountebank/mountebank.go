@@ -153,7 +153,7 @@ func (p *MountebankPlugin) IsReady(ctx context.Context) (bool, error) {
 		p.logger.Debug("Mountebank not ready yet", zap.Error(err))
 		return false, nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return resp.StatusCode == http.StatusOK, nil
 }
@@ -399,7 +399,7 @@ func (p *MountebankPlugin) postImposter(ctx context.Context, path string) error 
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to post imposter")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		return gtErrors.New(gtErrors.ErrServiceFailed,
@@ -418,6 +418,8 @@ func (p *MountebankPlugin) adminURL() string {
 // mustParsePort parses port string to int, returns 0 on error
 func mustParsePort(port string) int {
 	var p int
-	fmt.Sscanf(port, "%d", &p)
+	if _, err := fmt.Sscanf(port, "%d", &p); err != nil {
+		return 0
+	}
 	return p
 }

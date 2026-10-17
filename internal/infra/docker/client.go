@@ -85,7 +85,7 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, fmt.Sprintf("failed to pull image %s", imageName))
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	_, err = io.Copy(io.Discard, reader)
 	if err != nil {
@@ -295,7 +295,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail 
 	if err != nil {
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get container logs")
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Docker logs come with 8-byte headers, use stdcopy to demultiplex
 	var stdout, stderr bytes.Buffer
@@ -320,7 +320,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail 
 		if err2 != nil {
 			return "", gtErrors.Wrap(err2, gtErrors.ErrDockerFailed, "failed to get container logs (retry)")
 		}
-		defer reader2.Close()
+		defer func() { _ = reader2.Close() }()
 
 		logs, err3 := io.ReadAll(reader2)
 		if err3 != nil {

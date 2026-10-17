@@ -91,7 +91,7 @@ func TestRegistry_RegisterService(t *testing.T) {
 func TestRegistry_GetService(t *testing.T) {
 	registry := NewRegistry()
 	mock := &mockServicePlugin{name: "mountebank"}
-	registry.RegisterService(mock)
+	require.NoError(t, registry.RegisterService(mock))
 
 	t.Run("get existing service", func(t *testing.T) {
 		service, err := registry.GetService("mountebank")
@@ -125,7 +125,7 @@ func TestRegistry_ListServices(t *testing.T) {
 		}
 
 		for _, mock := range mocks {
-			registry.RegisterService(mock)
+			require.NoError(t, registry.RegisterService(mock))
 		}
 
 		services := registry.ListServices()
@@ -168,7 +168,7 @@ func TestRegistry_RegisterLauncher(t *testing.T) {
 func TestRegistry_GetLauncher(t *testing.T) {
 	registry := NewRegistry()
 	mock := &mockAppLauncher{tech: "nodejs"}
-	registry.RegisterLauncher(mock)
+	require.NoError(t, registry.RegisterLauncher(mock))
 
 	t.Run("get existing launcher", func(t *testing.T) {
 		launcher, err := registry.GetLauncher("nodejs")
@@ -211,7 +211,7 @@ func TestRegistry_RegisterExecutor(t *testing.T) {
 func TestRegistry_GetExecutor(t *testing.T) {
 	registry := NewRegistry()
 	mock := &mockTestExecutor{framework: "test-launcher-back"}
-	registry.RegisterExecutor(mock)
+	require.NoError(t, registry.RegisterExecutor(mock))
 
 	t.Run("get existing executor", func(t *testing.T) {
 		executor, err := registry.GetExecutor("test-launcher-back")
@@ -239,7 +239,7 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			go func(id int) {
 				mock := &mockServicePlugin{name: fmt.Sprintf("service%d", id)}
-				registry.RegisterService(mock)
+				assert.NoError(t, registry.RegisterService(mock))
 				done <- true
 			}(i)
 		}
@@ -247,7 +247,7 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 		// Concurrent retrievals
 		for i := 0; i < 5; i++ {
 			go func(id int) {
-				registry.GetService(fmt.Sprintf("service%d", id))
+				_, _ = registry.GetService(fmt.Sprintf("service%d", id))
 				done <- true
 			}(i)
 		}
@@ -300,18 +300,24 @@ func BenchmarkRegistry_RegisterService(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		mock := &mockServicePlugin{name: fmt.Sprintf("service%d", i)}
-		registry.RegisterService(mock)
+		if err := registry.RegisterService(mock); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
 func BenchmarkRegistry_GetService(b *testing.B) {
 	registry := NewRegistry()
 	mock := &mockServicePlugin{name: "test"}
-	registry.RegisterService(mock)
+	if err := registry.RegisterService(mock); err != nil {
+		b.Fatal(err)
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		registry.GetService("test")
+		if _, err := registry.GetService("test"); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -321,7 +327,9 @@ func BenchmarkRegistry_ListServices(b *testing.B) {
 	// Register 100 services
 	for i := 0; i < 100; i++ {
 		mock := &mockServicePlugin{name: fmt.Sprintf("service%d", i)}
-		registry.RegisterService(mock)
+		if err := registry.RegisterService(mock); err != nil {
+			b.Fatal(err)
+		}
 	}
 
 	b.ResetTimer()

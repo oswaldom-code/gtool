@@ -221,7 +221,7 @@ func runServicesUp(cmd *cobra.Command, args []string) error {
 	defer deps.close()
 
 	if err := deps.ping(ctx); err != nil {
-		return fmt.Errorf("Docker daemon not available: %w", err)
+		return fmt.Errorf("docker daemon not available: %w", err)
 	}
 
 	mockManager := deps.manager
@@ -450,7 +450,7 @@ func newStableLauncher(log *zap.Logger) (*stablemocks.Launcher, *docker.Client, 
 	}
 	if err := dockerClient.Ping(context.Background()); err != nil {
 		_ = dockerClient.Close()
-		return nil, nil, fmt.Errorf("Docker daemon not available: %w", err)
+		return nil, nil, fmt.Errorf("docker daemon not available: %w", err)
 	}
 	launcher, err := stablemocks.New(dockerClient, log)
 	if err != nil {

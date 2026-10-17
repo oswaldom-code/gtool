@@ -362,7 +362,7 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, config
 		zap.String("containerID", containerID),
 		zap.Strings("cmd", config.Cmd))
 
-	execConfig := types.ExecConfig{
+	execConfig := container.ExecOptions{
 		AttachStdout: config.AttachStdout,
 		AttachStderr: config.AttachStderr,
 		Cmd:          config.Cmd,
@@ -375,7 +375,7 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, config
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create exec instance")
 	}
 
-	resp, err := c.cli.ContainerExecAttach(ctx, execID.ID, types.ExecStartCheck{})
+	resp, err := c.cli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
 	if err != nil {
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to attach to exec instance")
 	}
@@ -450,7 +450,7 @@ func (c *Client) CopyToContainer(ctx context.Context, containerID, targetPath st
 		zap.String("containerID", containerID),
 		zap.String("targetPath", targetPath))
 
-	err := c.cli.CopyToContainer(ctx, containerID, targetPath, content, types.CopyToContainerOptions{})
+	err := c.cli.CopyToContainer(ctx, containerID, targetPath, content, container.CopyToContainerOptions{})
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to copy to container")
 	}

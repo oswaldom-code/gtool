@@ -146,7 +146,7 @@ func runKarate(_ *cobra.Command, _ []string) error {
 	}
 	defer dockerClient.Close()
 	if err := dockerClient.Ping(ctx); err != nil {
-		return fmt.Errorf("Docker daemon not available: %w", err)
+		return fmt.Errorf("docker daemon not available: %w", err)
 	}
 
 	runner := stablekarate.New(dockerClient, log.Logger)
@@ -225,7 +225,7 @@ func runStableTest(ctx context.Context, log *zap.Logger, cfg *config.Config) err
 	}
 	defer dockerClient.Close()
 	if err := dockerClient.Ping(ctx); err != nil {
-		return fmt.Errorf("Docker daemon not available: %w", err)
+		return fmt.Errorf("docker daemon not available: %w", err)
 	}
 
 	mocks, err := stablemocks.New(dockerClient, log)

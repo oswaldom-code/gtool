@@ -28,7 +28,7 @@ type fakeDocker struct {
 	logsText string
 }
 
-func (d *fakeDocker) PullImage(_ context.Context, _ string) error { return d.pullErr }
+func (d *fakeDocker) EnsureImage(_ context.Context, _ string) error { return d.pullErr }
 func (d *fakeDocker) CreateContainer(_ context.Context, c *docker.ContainerConfig) (string, error) {
 	d.created = c
 	if d.createErr != nil {

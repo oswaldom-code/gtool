@@ -218,7 +218,7 @@ go test -tags=integration ./internal/plugin/services/...
 
 ## ⚠️ Known limitations
 
-- **App→mock networking on Linux (native `gtool test`).** The default pipeline runs the app as a bridge-network container while the mocks publish their ports on the host, so a containerized app cannot reach a mock at `localhost`. It needs a host gateway (`host.docker.internal`, automatic on Docker Desktop, manual on Linux) or a shared Docker network. The `--stable` / `--native` path avoids this by running the app as native processes that reach the mocks over `127.0.0.1` (mountebank runs on the host network).
+- **App→mock networking (native `gtool test`).** The default pipeline runs the app as a bridge-network container while the mocks publish their ports on the host, so a containerized app cannot reach a mock at `localhost`. gtool maps `host.docker.internal` to the host gateway on the app container, so point the app at `host.docker.internal:<mock port>` on Linux and Docker Desktop alike. On Linux hosts with a firewall that drops incoming traffic from the Docker bridge (for example ufw with its default policy), allow it with `sudo ufw allow in on docker0`. The `--stable` / `--native` path runs the app as native processes that reach the mocks over `127.0.0.1`.
 - **Newer mock plugins are lightly tested.** `redis`, `mongodb`, `mysql` and `minio` currently have unit tests only — no Docker integration tests yet. Treat them as experimental.
 - **Karate result is exit-code based.** Pass/fail comes from the launcher's exit code; there is no per-scenario parsing of the `karate-reports` output.
 

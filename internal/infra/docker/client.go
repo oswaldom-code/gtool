@@ -36,6 +36,7 @@ type ContainerConfig struct {
 	PortBindings map[string]string
 	Mounts       []Mount
 	NetworkMode  string
+	ExtraHosts   []string
 	AutoRemove   bool
 	Init         bool
 	User         string
@@ -171,6 +172,7 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 	hostConfig := &container.HostConfig{
 		PortBindings: portBindings,
 		Mounts:       mounts,
+		ExtraHosts:   config.ExtraHosts,
 		AutoRemove:   config.AutoRemove,
 	}
 

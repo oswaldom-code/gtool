@@ -90,6 +90,7 @@ func (k *KarateRunner) Run(ctx context.Context, cfg *config.Config) (*plugin.Tes
 		Env:         env,
 		Mounts:      mounts,
 		NetworkMode: "host",
+		User:        docker.HostUser(),
 		Labels: map[string]string{
 			"managed-by": "gtool",
 			"gtool-role": "test",

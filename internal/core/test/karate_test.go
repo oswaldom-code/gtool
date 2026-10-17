@@ -88,6 +88,7 @@ func TestKarateRunner_Pass(t *testing.T) {
 	// Tags propagated and host networking used so tests reach localhost.
 	assert.Contains(t, d.created.Env, "TAGS=smoke,regression")
 	assert.Equal(t, "host", d.created.NetworkMode)
+	assert.Equal(t, docker.HostUser(), d.created.User)
 	assert.Equal(t, DefaultLauncherImage, d.created.Image)
 }
 

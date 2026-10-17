@@ -34,8 +34,7 @@ func (f *fakeDocker) CreateContainer(_ context.Context, cfg *docker.ContainerCon
 	return "cid", nil
 }
 
-// karateCfg returns the launcher container config (the one on the host network),
-// as opposed to the helper chown container.
+// karateCfg returns the launcher container config (the one on the host network).
 func (f *fakeDocker) karateCfg() *docker.ContainerConfig {
 	for _, c := range f.created {
 		if c.NetworkMode == "host" {
@@ -120,6 +119,8 @@ func TestRunPassesAndOpensReport(t *testing.T) {
 	assert.Equal(t, defaultImage, cc.Image)
 	assert.Equal(t, "host", cc.NetworkMode)
 	assert.True(t, cc.Init)
+	assert.Equal(t, docker.HostUser(), cc.User)
+	assert.Len(t, fd.created, 1)
 	assert.Contains(t, cc.Env, "PUBSUB_EMULATOR_HOST="+pubsubEmulatorHost)
 	assert.Contains(t, cc.Env, "TAGS=@smoke")
 	assert.Contains(t, cc.Env, "URLS_TO_BLOCK=a.com,b.com")

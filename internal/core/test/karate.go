@@ -30,7 +30,7 @@ const (
 
 // DockerClient is the subset of *docker.Client used by the Karate runner.
 type DockerClient interface {
-	PullImage(ctx context.Context, image string) error
+	EnsureImage(ctx context.Context, image string) error
 	CreateContainer(ctx context.Context, config *docker.ContainerConfig) (string, error)
 	StartContainer(ctx context.Context, containerID string) error
 	WaitForContainer(ctx context.Context, containerID string, condition container.WaitCondition) error
@@ -79,9 +79,9 @@ func (k *KarateRunner) Run(ctx context.Context, cfg *config.Config) (*plugin.Tes
 		env = append(env, "TAGS="+tc.Tags)
 	}
 
-	k.logger.Info("pulling test launcher", zap.String("image", k.image))
-	if err := k.docker.PullImage(ctx, k.image); err != nil {
-		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "failed to pull test launcher image")
+	k.logger.Info("ensuring test launcher image", zap.String("image", k.image))
+	if err := k.docker.EnsureImage(ctx, k.image); err != nil {
+		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "failed to get test launcher image")
 	}
 
 	containerID, err := k.docker.CreateContainer(ctx, &docker.ContainerConfig{

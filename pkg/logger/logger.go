@@ -37,7 +37,7 @@ func New(level string, structured bool) (*Logger, error) {
 
 func (l *Logger) WithContext(ctx context.Context, fields ...zap.Field) *zap.Logger {
 	// TODO: Extract fields from context (trace ID, request ID, etc.)
-	return l.Logger.With(fields...)
+	return l.With(fields...)
 }
 
 func Default() *Logger {

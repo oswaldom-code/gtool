@@ -129,8 +129,8 @@ func TestGTError_WithContext(t *testing.T) {
 	assert.Equal(t, "couchbase", err.Context["service"])
 
 	// Add multiple context values
-	err.WithContext("port", 8091)
-	err.WithContext("timeout", "30s")
+	err = err.WithContext("port", 8091)
+	err = err.WithContext("timeout", "30s")
 
 	assert.Equal(t, 3, len(err.Context))
 	assert.Equal(t, 8091, err.Context["port"])
@@ -223,8 +223,8 @@ func ExampleWrap() {
 
 func ExampleGTError_WithContext() {
 	err := New(ErrServiceFailed, "service failed to start")
-	err.WithContext("service", "couchbase")
-	err.WithContext("port", 8091)
+	err = err.WithContext("service", "couchbase")
+	err = err.WithContext("port", 8091)
 
 	fmt.Printf("Code: %s, Message: %s, Service: %s\n",
 		err.Code, err.Message, err.Context["service"])
@@ -251,6 +251,6 @@ func BenchmarkWithContext(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		err.WithContext("iteration", i)
+		_ = err.WithContext("iteration", i)
 	}
 }

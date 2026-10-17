@@ -462,6 +462,8 @@ func (p *PostgreSQLPlugin) executeScript(ctx context.Context, scriptPath string)
 // mustParsePort parses port string to int, panics on error
 func mustParsePort(port string) int {
 	var p int
-	fmt.Sscanf(port, "%d", &p)
+	if _, err := fmt.Sscanf(port, "%d", &p); err != nil {
+		return 0
+	}
 	return p
 }

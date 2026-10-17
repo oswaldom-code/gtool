@@ -110,6 +110,17 @@ func TestDockerManager_Start(t *testing.T) {
 		assert.Contains(t, err.Error(), "already running")
 	})
 
+	t.Run("removes the container when start fails", func(t *testing.T) {
+		d := &fakeDocker{startErr: errors.New("port is already allocated")}
+		m := NewDockerManager(d, nil)
+
+		err := m.Start(ctx, &plugin.AppConfig{DockerImage: "myapp:latest"})
+
+		require.Error(t, err)
+		assert.True(t, gtErrors.Is(err, gtErrors.ErrDockerFailed))
+		assert.Equal(t, []string{"container-id"}, d.removed)
+	})
+
 	t.Run("wraps image failure", func(t *testing.T) {
 		d := &fakeDocker{pullErr: errors.New("boom")}
 		m := NewDockerManager(d, nil)

@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -249,7 +250,7 @@ func TestIsReady_NotStarted(t *testing.T) {
 	plugin := NewMySQLPlugin(nil, nil)
 
 	// Should return error when container not started
-	ready, err := plugin.IsReady(nil)
+	ready, err := plugin.IsReady(context.TODO())
 	assert.False(t, ready)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not started")
@@ -259,6 +260,6 @@ func TestStop_NoContainer(t *testing.T) {
 	plugin := NewMySQLPlugin(nil, zap.NewNop())
 
 	// Should not error when no container to stop
-	err := plugin.Stop(nil)
+	err := plugin.Stop(context.TODO())
 	assert.NoError(t, err)
 }

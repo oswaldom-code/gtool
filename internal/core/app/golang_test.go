@@ -49,7 +49,7 @@ func TestGolangLauncher_IsReady_HTTPProbe(t *testing.T) {
 		BinaryPath: writeScript(t, "sleep 30"),
 		Port:       port,
 	}))
-	defer g.Stop(ctx)
+	defer func() { assert.NoError(t, g.Stop(ctx)) }()
 
 	ready, err := g.IsReady(ctx)
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func TestGolangLauncher_IsReady_NoPort(t *testing.T) {
 	ctx := context.Background()
 	g := newGolang()
 	require.NoError(t, g.Launch(ctx, &plugin.AppConfig{BinaryPath: writeScript(t, "sleep 30")}))
-	defer g.Stop(ctx)
+	defer func() { assert.NoError(t, g.Stop(ctx)) }()
 
 	ready, err := g.IsReady(ctx)
 	require.NoError(t, err)

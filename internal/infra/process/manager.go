@@ -6,6 +6,7 @@ package process
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"sync"
@@ -15,6 +16,8 @@ import (
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
+
+const outputWaitDelay = time.Second
 
 // StartOptions describes a process to launch.
 type StartOptions struct {
@@ -102,6 +105,7 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Process, error
 	out := &lineBuffer{}
 	cmd.Stdout = out
 	cmd.Stderr = out
+	cmd.WaitDelay = outputWaitDelay
 
 	if err := cmd.Start(); err != nil {
 		return nil, gtErrors.Wrap(err, gtErrors.ErrProcessFailed, "failed to start process")
@@ -155,7 +159,7 @@ func (m *Manager) Stop(pid int, timeout time.Duration) error {
 		return nil
 	case <-time.After(timeout):
 		m.logger.Warn("process did not stop, sending SIGKILL", zap.Int("pid", pid))
-		if err := p.cmd.Process.Kill(); err != nil {
+		if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			return gtErrors.Wrap(err, gtErrors.ErrProcessFailed, "failed to kill process")
 		}
 		<-p.doneCh
@@ -174,7 +178,7 @@ func (m *Manager) Kill(pid int) error {
 		return nil
 	}
 
-	if err := p.cmd.Process.Kill(); err != nil {
+	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return gtErrors.Wrap(err, gtErrors.ErrProcessFailed, "failed to kill process")
 	}
 	<-p.doneCh

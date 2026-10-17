@@ -85,7 +85,7 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, fmt.Sprintf("failed to pull image %s", imageName))
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	_, err = io.Copy(io.Discard, reader)
 	if err != nil {
@@ -295,7 +295,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail 
 	if err != nil {
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get container logs")
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Docker logs come with 8-byte headers, use stdcopy to demultiplex
 	var stdout, stderr bytes.Buffer
@@ -320,7 +320,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail 
 		if err2 != nil {
 			return "", gtErrors.Wrap(err2, gtErrors.ErrDockerFailed, "failed to get container logs (retry)")
 		}
-		defer reader2.Close()
+		defer func() { _ = reader2.Close() }()
 
 		logs, err3 := io.ReadAll(reader2)
 		if err3 != nil {
@@ -362,7 +362,7 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, config
 		zap.String("containerID", containerID),
 		zap.Strings("cmd", config.Cmd))
 
-	execConfig := types.ExecConfig{
+	execConfig := container.ExecOptions{
 		AttachStdout: config.AttachStdout,
 		AttachStderr: config.AttachStderr,
 		Cmd:          config.Cmd,
@@ -375,7 +375,7 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, config
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create exec instance")
 	}
 
-	resp, err := c.cli.ContainerExecAttach(ctx, execID.ID, types.ExecStartCheck{})
+	resp, err := c.cli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
 	if err != nil {
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to attach to exec instance")
 	}
@@ -450,7 +450,7 @@ func (c *Client) CopyToContainer(ctx context.Context, containerID, targetPath st
 		zap.String("containerID", containerID),
 		zap.String("targetPath", targetPath))
 
-	err := c.cli.CopyToContainer(ctx, containerID, targetPath, content, types.CopyToContainerOptions{})
+	err := c.cli.CopyToContainer(ctx, containerID, targetPath, content, container.CopyToContainerOptions{})
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to copy to container")
 	}

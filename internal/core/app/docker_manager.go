@@ -102,6 +102,9 @@ func (m *DockerManager) Start(ctx context.Context, cfg *plugin.AppConfig) error 
 	}
 
 	if err := m.docker.StartContainer(ctx, containerID); err != nil {
+		if rmErr := m.docker.RemoveContainer(context.Background(), containerID, true); rmErr != nil {
+			m.logger.Warn("failed to remove application container", zap.String("containerID", containerID), zap.Error(rmErr))
+		}
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start application container")
 	}
 

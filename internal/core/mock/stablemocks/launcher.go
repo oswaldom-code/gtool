@@ -332,7 +332,7 @@ func (l *Launcher) putResource(ctx context.Context, url string, body []byte) err
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "request failed")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict {
 		return gtErrors.New(gtErrors.ErrServiceFailed,

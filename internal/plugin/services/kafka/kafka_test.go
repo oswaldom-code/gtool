@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -147,7 +148,7 @@ func TestBootstrapServers(t *testing.T) {
 func TestIsReady_NotStarted(t *testing.T) {
 	p := NewKafkaPlugin(nil, nil)
 
-	ready, err := p.IsReady(nil)
+	ready, err := p.IsReady(context.TODO())
 
 	assert.False(t, ready)
 	require.Error(t, err)
@@ -157,7 +158,7 @@ func TestIsReady_NotStarted(t *testing.T) {
 func TestStop_NoContainer(t *testing.T) {
 	p := NewKafkaPlugin(nil, zap.NewNop())
 
-	err := p.Stop(nil)
+	err := p.Stop(context.TODO())
 	assert.NoError(t, err)
 }
 

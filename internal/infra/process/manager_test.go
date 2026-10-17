@@ -144,6 +144,25 @@ func TestManager_Stop_AlreadyExited(t *testing.T) {
 	require.NoError(t, m.Stop(p.PID, time.Second))
 }
 
+func TestManager_Stop_ChildKeepsOutputOpen(t *testing.T) {
+	m := NewManager(nil)
+
+	p, err := m.Start(context.Background(), StartOptions{
+		Command: "sh",
+		Args:    []string{"-c", "trap 'exit 0' TERM; sleep 5 & echo ready; wait"},
+	})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		out, _ := m.GetOutput(p.PID)
+		return len(out) > 0 && out[0] == "ready"
+	}, 2*time.Second, 5*time.Millisecond)
+
+	start := time.Now()
+	require.NoError(t, m.Stop(p.PID, 2*time.Second))
+	assert.False(t, m.IsRunning(p.PID))
+	assert.Less(t, time.Since(start), 2*time.Second)
+}
+
 func TestManager_ExitError(t *testing.T) {
 	m := NewManager(nil)
 

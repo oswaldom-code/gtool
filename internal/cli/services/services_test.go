@@ -119,7 +119,7 @@ func TestRunServicesUp(t *testing.T) {
 		err := runServicesUp(newServicesUpCmd(), []string{"postgresql"})
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Docker daemon not available")
+		assert.Contains(t, err.Error(), "docker daemon not available")
 	})
 
 	t.Run("errors when no services configured", func(t *testing.T) {

@@ -1,0 +1,26 @@
+version: v1
+
+# The application under test: built from the Dockerfile in this directory.
+app-technology: golang
+app-config:
+  docker-image: redis-app:latest
+  port: 8080
+  environment:
+    # The app container reaches the host-published Redis through the host
+    # gateway that gtool maps to host.docker.internal.
+    REDIS_ADDR: host.docker.internal:6379
+
+# Backend API tests (Karate).
+test-launcher: test-launcher-back
+test-config:
+  features-path: ./test/component/features
+  reports-path: ./test/component/reports
+  tags: smoke
+
+# Mock dependencies started by gtool.
+third-party:
+  mocks:
+    - redis
+  mock-config:
+    redis:
+      port: "6379"

@@ -1,0 +1,28 @@
+version: v1
+
+# The application under test: built from the Dockerfile in this directory.
+app-technology: golang
+app-config:
+  docker-image: mysql-app:latest
+  port: 8080
+  environment:
+    # The app container reaches the host-published MySQL through the host
+    # gateway that gtool maps to host.docker.internal.
+    MYSQL_DSN: root:root@tcp(host.docker.internal:3306)/test
+
+# Backend API tests (Karate).
+test-launcher: test-launcher-back
+test-config:
+  features-path: ./test/component/features
+  reports-path: ./test/component/reports
+  tags: smoke
+
+# Mock dependencies started by gtool.
+third-party:
+  mocks:
+    - mysql
+  mock-config:
+    mysql:
+      port: "3306"
+      root-password: root
+      database: test

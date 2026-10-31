@@ -20,7 +20,7 @@ Configuration is read from environment variables: `DB_HOST`, `DB_PORT`,
 # Start PostgreSQL with the seed schema
 docker run -d --name pg -p 5432:5432 \
   -e POSTGRES_PASSWORD=postgres \
-  -v "$PWD/init":/docker-entrypoint-initdb.d \
+  -v "$PWD/test/component/mocks-data/postgresql":/docker-entrypoint-initdb.d \
   postgres:16-alpine
 
 # Run the app against it
@@ -41,8 +41,9 @@ docker build -t postgres-app:latest .
 gtool test --config component-config.yml
 ```
 
-`gtool test` starts the PostgreSQL mock (seeded from `init/`), starts this app,
-runs the Karate features in `features/`, and tears everything down.
+`gtool test` starts the PostgreSQL mock (seeded from
+`test/component/mocks-data/postgresql/`), starts this app, runs the Karate
+features in `test/component/features/`, and tears everything down.
 
 ## Networking notes
 

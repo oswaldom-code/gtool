@@ -36,4 +36,4 @@ release/
 
 # Reports
 test/component/reports/
-examples/*/reports/
+examples/*/test/component/reports/

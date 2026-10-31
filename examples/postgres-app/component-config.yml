@@ -17,8 +17,8 @@ app-config:
 # Backend API tests (Karate).
 test-launcher: test-launcher-back
 test-config:
-  features-path: ./features
-  reports-path: ./reports
+  features-path: ./test/component/features
+  reports-path: ./test/component/reports
   tags: smoke
 
 # Mock dependencies started by gtool.
@@ -31,4 +31,4 @@ third-party:
       user: postgres
       password: postgres
       database: postgres
-      scripts-path: ./init
+      scripts-path: ./test/component/mocks-data/postgresql

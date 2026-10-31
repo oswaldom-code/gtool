@@ -167,7 +167,7 @@ func (p *PubSubPlugin) IsReady(ctx context.Context) (bool, error) {
 		p.logger.Debug("Pub/Sub not ready yet", zap.Error(err))
 		return false, nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return resp.StatusCode == http.StatusOK, nil
 }
@@ -420,7 +420,7 @@ func (p *PubSubPlugin) putResource(ctx context.Context, url string, body []byte)
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "request failed")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict {
 		return gtErrors.New(gtErrors.ErrServiceFailed,
@@ -449,6 +449,8 @@ func (p *PubSubPlugin) subscriptionURL(sub string) string {
 // mustParsePort parses port string to int, returns 0 on error
 func mustParsePort(port string) int {
 	var p int
-	fmt.Sscanf(port, "%d", &p)
+	if _, err := fmt.Sscanf(port, "%d", &p); err != nil {
+		return 0
+	}
 	return p
 }

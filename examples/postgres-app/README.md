@@ -48,10 +48,10 @@ features in `test/component/features/`, and tears everything down.
 ## Networking notes
 
 - **App → mock:** gtool runs the app as a bridge-network container while the
-  mock publishes `5432` on the host. The app reaches the mock through
-  `host.docker.internal`, which gtool maps to the host gateway on the app
-  container, so this works on both Linux and Docker Desktop.
+  mock publishes `5432` on the host. The app therefore reaches the mock through
+  the host gateway: gtool maps `host.docker.internal` to it on the app
+  container, on Linux and Docker Desktop alike.
 - **Tests → app:** the Karate launcher runs on the host network, so it reaches
   the app at `localhost:8080`.
 - **Local image:** `postgres-app:latest` only exists locally after
-  `docker build`; gtool uses the local copy and only pulls when it is missing.
+  `docker build`; gtool uses the local image and only pulls when it is missing.

@@ -87,6 +87,7 @@ func TestDockerManager_Start(t *testing.T) {
 		assert.Equal(t, "myapp:latest", d.created.Image)
 		assert.Equal(t, map[string]string{"8080": "8080"}, d.created.PortBindings)
 		assert.Contains(t, d.created.Env, "FOO=bar")
+		assert.Equal(t, []string{"host.docker.internal:host-gateway"}, d.created.ExtraHosts)
 		assert.Equal(t, "app", d.created.Labels["gtool-role"])
 		assert.Equal(t, []string{"host.docker.internal:host-gateway"}, d.created.ExtraHosts)
 	})
@@ -108,6 +109,17 @@ func TestDockerManager_Start(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "already running")
+	})
+
+	t.Run("removes the container when start fails", func(t *testing.T) {
+		d := &fakeDocker{startErr: errors.New("port is already allocated")}
+		m := NewDockerManager(d, nil)
+
+		err := m.Start(ctx, &plugin.AppConfig{DockerImage: "myapp:latest"})
+
+		require.Error(t, err)
+		assert.True(t, gtErrors.Is(err, gtErrors.ErrDockerFailed))
+		assert.Equal(t, []string{"container-id"}, d.removed)
 	})
 
 	t.Run("wraps image failure", func(t *testing.T) {

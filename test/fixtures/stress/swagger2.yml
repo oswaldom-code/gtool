@@ -1,0 +1,51 @@
+swagger: "2.0"
+info:
+  title: Shop
+  version: "1.0"
+host: shop.example.com
+basePath: /v2/
+consumes: [application/json]
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      parameters:
+        - name: status
+          in: query
+          required: true
+          type: string
+          enum: [available, sold]
+        - name: page
+          in: query
+          type: integer
+      responses:
+        "200": { description: ok }
+    post:
+      operationId: addPet
+      tags: [pets]
+      parameters:
+        - name: pet
+          in: body
+          required: true
+          schema:
+            type: object
+            example: { name: rex }
+      responses:
+        "201": { description: created }
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      tags: [pets]
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          type: integer
+        - name: X-Trace
+          in: header
+          required: true
+          type: string
+          default: trace-1
+      responses:
+        "200": { description: ok }

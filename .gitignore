@@ -36,3 +36,4 @@ release/
 
 # Reports
 test/component/reports/
+examples/*/reports/

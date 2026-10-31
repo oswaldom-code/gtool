@@ -6,6 +6,7 @@ import (
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/couchbase"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/floci"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/gcs"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/kafka"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/minio"
@@ -65,6 +66,11 @@ func RegisterAll(registry *plugin.Registry, dockerClient *docker.Client, logger 
 
 	minioPlugin := minio.NewMinIOPlugin(dockerClient, logger)
 	if err := registry.RegisterService(minioPlugin); err != nil {
+		return err
+	}
+
+	flociPlugin := floci.NewFlociPlugin(dockerClient, logger)
+	if err := registry.RegisterService(flociPlugin); err != nil {
 		return err
 	}
 

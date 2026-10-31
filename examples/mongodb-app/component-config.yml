@@ -1,0 +1,29 @@
+version: v1
+
+# The application under test: built from the Dockerfile in this directory.
+app-technology: golang
+app-config:
+  docker-image: mongodb-app:latest
+  port: 8080
+  environment:
+    # The app container reaches the host-published MongoDB through the host
+    # gateway that gtool maps to host.docker.internal.
+    MONGO_URI: mongodb://host.docker.internal:27017
+    MONGO_DATABASE: test
+    COLLECTION: customers
+
+# Backend API tests (Karate).
+test-launcher: test-launcher-back
+test-config:
+  features-path: ./test/component/features
+  reports-path: ./test/component/reports
+  tags: smoke
+
+# Mock dependencies started by gtool.
+third-party:
+  mocks:
+    - mongodb
+  mock-config:
+    mongodb:
+      port: "27017"
+      database: test

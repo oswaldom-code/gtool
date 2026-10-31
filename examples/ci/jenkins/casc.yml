@@ -1,0 +1,27 @@
+jenkins:
+  systemMessage: "gtool CI demo: component tests run with gtool"
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: admin
+  authorizationStrategy: loggedInUsersCanDoAnything
+
+jobs:
+  - script: >
+      pipelineJob('postgres-app') {
+        description('Builds postgres-app and runs its component tests with gtool')
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('${APP_REPO_URL}') }
+                branch('*/main')
+              }
+            }
+            scriptPath('Jenkinsfile')
+          }
+        }
+      }

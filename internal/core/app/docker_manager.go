@@ -27,7 +27,7 @@ func appLabels() map[string]string {
 
 // DockerClient is the subset of *docker.Client used by the DockerManager.
 type DockerClient interface {
-	PullImage(ctx context.Context, image string) error
+	EnsureImage(ctx context.Context, image string) error
 	CreateContainer(ctx context.Context, config *docker.ContainerConfig) (string, error)
 	StartContainer(ctx context.Context, containerID string) error
 	StopContainer(ctx context.Context, containerID string, timeout *int) error
@@ -75,9 +75,8 @@ func (m *DockerManager) Start(ctx context.Context, cfg *plugin.AppConfig) error 
 		return gtErrors.New(gtErrors.ErrServiceFailed, "application is already running")
 	}
 
-	m.logger.Info("pulling application image", zap.String("image", cfg.DockerImage))
-	if err := m.docker.PullImage(ctx, cfg.DockerImage); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull application image")
+	if err := m.docker.EnsureImage(ctx, cfg.DockerImage); err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to ensure application image")
 	}
 
 	containerConfig := &docker.ContainerConfig{
@@ -86,6 +85,8 @@ func (m *DockerManager) Start(ctx context.Context, cfg *plugin.AppConfig) error 
 		Env:          envSlice(cfg.Environment),
 		PortBindings: portBindings(cfg.Port),
 		Labels:       appLabels(),
+		// Lets the app reach host-published mocks on Linux (Docker Desktop resolves it natively).
+		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
 
 	m.logger.Info("creating application container",

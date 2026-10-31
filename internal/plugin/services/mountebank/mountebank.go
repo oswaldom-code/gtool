@@ -3,6 +3,7 @@ package mountebank
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -60,6 +61,32 @@ func (p *MountebankPlugin) Name() string {
 	return "mountebank"
 }
 
+// imposterPorts returns the port declared by each imposter file in dir so the
+// container can publish them alongside the admin port. Unreadable or invalid
+// files are skipped here; loadImposters reports them when posting.
+func imposterPorts(dir string) []string {
+	if dir == "" {
+		return nil
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+
+	var ports []string
+	for _, file := range files {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		var imposter struct {
+			Port int `json:"port"`
+		}
+		if err := json.Unmarshal(content, &imposter); err != nil || imposter.Port <= 0 {
+			continue
+		}
+		ports = append(ports, fmt.Sprintf("%d", imposter.Port))
+	}
+	return ports
+}
+
 // Launch starts the Mountebank service with given configuration
 func (p *MountebankPlugin) Launch(ctx context.Context, config map[string]interface{}) error {
 	p.logger.Info("launching Mountebank service")
@@ -75,12 +102,15 @@ func (p *MountebankPlugin) Launch(ctx context.Context, config map[string]interfa
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull Mountebank image")
 	}
 
+	bindings := map[string]string{adminPort: cfg.Port}
+	for _, port := range imposterPorts(cfg.ImpostersPath) {
+		bindings[port] = port
+	}
+
 	containerConfig := &docker.ContainerConfig{
-		Image: cfg.Image,
-		Name:  cfg.ContainerName,
-		PortBindings: map[string]string{
-			adminPort: cfg.Port,
-		},
+		Image:        cfg.Image,
+		Name:         cfg.ContainerName,
+		PortBindings: bindings,
 		Labels: map[string]string{
 			"managed-by": "gtool",
 			"service":    "mountebank",

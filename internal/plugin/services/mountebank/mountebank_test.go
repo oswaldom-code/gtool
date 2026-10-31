@@ -2,6 +2,8 @@ package mountebank
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -153,4 +155,22 @@ func TestMustParsePort(t *testing.T) {
 			assert.Equal(t, tt.want, mustParsePort(tt.input))
 		})
 	}
+}
+
+func TestImposterPorts(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"api.json":     `{"port": 4545, "protocol": "http"}`,
+		"other.json":   `{"port": 4546}`,
+		"no-port.json": `{"protocol": "http"}`,
+		"invalid.json": `{not json`,
+		"ignored.ejs":  `{"port": 9999}`,
+	}
+	for name, content := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644))
+	}
+
+	assert.ElementsMatch(t, []string{"4545", "4546"}, imposterPorts(dir))
+	assert.Nil(t, imposterPorts(""))
+	assert.Empty(t, imposterPorts(filepath.Join(dir, "missing")))
 }

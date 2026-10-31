@@ -5,9 +5,9 @@ BINARY_NAME=gtool
 BUILD_DIR=bin
 GO=go
 GOFLAGS=-v
-LDFLAGS=-ldflags "-X github.com/oswaldo-montano/gtool/internal/cli.Version=$(VERSION) \
-				  -X github.com/oswaldo-montano/gtool/internal/cli.GitCommit=$(GIT_COMMIT) \
-				  -X github.com/oswaldo-montano/gtool/internal/cli.BuildDate=$(BUILD_DATE)"
+LDFLAGS=-ldflags "-X github.com/oswaldom-code/gtool/internal/cli.Version=$(VERSION) \
+				  -X github.com/oswaldom-code/gtool/internal/cli.GitCommit=$(GIT_COMMIT) \
+				  -X github.com/oswaldom-code/gtool/internal/cli.BuildDate=$(BUILD_DATE)"
 
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 GIT_COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")

@@ -35,7 +35,7 @@ graph LR
 
 **Un solo `gtool test` corre el pipeline completo:**
 
-1. **Mocks** — levanta las dependencias de terceros en Docker. 10 servicios incorporados: PostgreSQL, MySQL, MongoDB, Redis, Kafka, Pub/Sub, Couchbase, GCS, MinIO y Mountebank.
+1. **Mocks** — levanta las dependencias de terceros en Docker. 11 servicios incorporados: PostgreSQL, MySQL, MongoDB, Redis, Kafka, Pub/Sub, Couchbase, GCS, Floci (AWS: S3, SQS), MinIO (deprecado) y Mountebank.
 2. **App** — lanza el servicio bajo prueba, como imagen Docker o como binarios nativos.
 3. **Tests** — ejecuta la suite Karate (API backend) contra la app y sus mocks.
 4. **Reporte** — genera el reporte HTML de Karate y puede abrirlo en el navegador.

@@ -1,6 +1,7 @@
 package mountebank
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -123,7 +124,7 @@ func TestAdminURL(t *testing.T) {
 func TestIsReady_NotStarted(t *testing.T) {
 	p := NewMountebankPlugin(nil, nil)
 
-	ready, err := p.IsReady(nil)
+	ready, err := p.IsReady(context.TODO())
 
 	assert.False(t, ready)
 	require.Error(t, err)
@@ -133,7 +134,7 @@ func TestIsReady_NotStarted(t *testing.T) {
 func TestStop_NoContainer(t *testing.T) {
 	p := NewMountebankPlugin(nil, zap.NewNop())
 
-	err := p.Stop(nil)
+	err := p.Stop(context.TODO())
 	assert.NoError(t, err)
 }
 

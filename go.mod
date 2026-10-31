@@ -1,6 +1,6 @@
 module github.com/oswaldom-code/gtool
 
-go 1.24.9
+go 1.26.2
 
 require (
 	github.com/docker/docker v27.5.0+incompatible

@@ -14,7 +14,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const appContainerPrefix = "gtool-app"
+const (
+	appContainerPrefix = "gtool-app"
+	hostGatewayAlias   = "host.docker.internal:host-gateway"
+)
 
 // appLabels identify the application container managed by gtool. They are
 // distinct from the mock service labels so the two never collide.
@@ -75,8 +78,9 @@ func (m *DockerManager) Start(ctx context.Context, cfg *plugin.AppConfig) error 
 		return gtErrors.New(gtErrors.ErrServiceFailed, "application is already running")
 	}
 
+	m.logger.Info("ensuring application image", zap.String("image", cfg.DockerImage))
 	if err := m.docker.EnsureImage(ctx, cfg.DockerImage); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to ensure application image")
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get application image")
 	}
 
 	containerConfig := &docker.ContainerConfig{
@@ -84,9 +88,8 @@ func (m *DockerManager) Start(ctx context.Context, cfg *plugin.AppConfig) error 
 		Name:         fmt.Sprintf("%s-%d", appContainerPrefix, time.Now().Unix()),
 		Env:          envSlice(cfg.Environment),
 		PortBindings: portBindings(cfg.Port),
+		ExtraHosts:   []string{hostGatewayAlias},
 		Labels:       appLabels(),
-		// Lets the app reach host-published mocks on Linux (Docker Desktop resolves it natively).
-		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
 
 	m.logger.Info("creating application container",
@@ -99,6 +102,9 @@ func (m *DockerManager) Start(ctx context.Context, cfg *plugin.AppConfig) error 
 	}
 
 	if err := m.docker.StartContainer(ctx, containerID); err != nil {
+		if rmErr := m.docker.RemoveContainer(context.Background(), containerID, true); rmErr != nil {
+			m.logger.Warn("failed to remove application container", zap.String("containerID", containerID), zap.Error(rmErr))
+		}
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start application container")
 	}
 

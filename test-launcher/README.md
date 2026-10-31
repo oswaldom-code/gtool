@@ -67,7 +67,7 @@ ports line up with the mocks `gtool services up` starts.
 | Entry | `CMD ["bash","-c","./scripts/run.bash"]` |
 | Env | `TAGS`, `URLS_TO_BLOCK`, `PUBSUB_EMULATOR_HOST` |
 | Network | host |
-| User | root (reports are chowned back by gtool) |
+| User | invoking host user (`uid:gid`), so reports are owned by it |
 | Pass/fail | container exit code |
 
 `src/test/java/launcher/features` is a symlink to `/app/features`, so user

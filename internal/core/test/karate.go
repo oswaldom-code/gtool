@@ -147,8 +147,9 @@ func (k *KarateRunner) Run(ctx context.Context, cfg *config.Config) (*plugin.Tes
 		env = append(env, "PUBSUB_EMULATOR_HOST="+host)
 	}
 
+	k.logger.Info("ensuring test launcher image", zap.String("image", k.image))
 	if err := k.docker.EnsureImage(ctx, k.image); err != nil {
-		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "failed to ensure test launcher image")
+		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "failed to get test launcher image")
 	}
 
 	containerID, err := k.docker.CreateContainer(ctx, &docker.ContainerConfig{
@@ -157,6 +158,7 @@ func (k *KarateRunner) Run(ctx context.Context, cfg *config.Config) (*plugin.Tes
 		Env:         env,
 		Mounts:      mounts,
 		NetworkMode: "host",
+		User:        docker.HostUser(),
 		Labels: map[string]string{
 			"managed-by": "gtool",
 			"gtool-role": "test",

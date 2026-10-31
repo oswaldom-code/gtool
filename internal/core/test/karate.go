@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,8 @@ const (
 	// test-launcher/). Build it locally with `make test-launcher-image`; override
 	// it via NewKarateRunner when needed.
 	DefaultLauncherImage = "gtool/test-launcher-back:latest"
+
+	defaultPubSubPort = "8085"
 
 	featuresTarget = "/app/features"
 	reportsTarget  = "/app/target/karate-reports"
@@ -59,6 +62,68 @@ func NewKarateRunner(dockerClient DockerClient, image string, logger *zap.Logger
 	return &KarateRunner{docker: dockerClient, image: image, logger: logger}
 }
 
+// pubsubEmulatorHost returns the address the launcher's Pub/Sub helpers must
+// use when the pubsub mock is configured, or "" otherwise. The launcher runs on
+// the host network, so the emulator is reached on its host-published port.
+func pubsubEmulatorHost(cfg *config.Config) string {
+	enabled := false
+	for _, m := range cfg.ThirdParty.Mocks {
+		if m == "pubsub" {
+			enabled = true
+			break
+		}
+	}
+	if !enabled {
+		return ""
+	}
+
+	port := defaultPubSubPort
+	if mc, ok := cfg.ThirdParty.MockConfig["pubsub"].(map[string]interface{}); ok {
+		switch p := mc["port"].(type) {
+		case string:
+			if p != "" {
+				port = p
+			}
+		case int:
+			port = strconv.Itoa(p)
+		case float64:
+			port = strconv.Itoa(int(p))
+		}
+	}
+	return "127.0.0.1:" + port
+}
+
+// chownToUser hands ownership of the reports tree back to the invoking user by
+// running chown inside a short-lived root container (the launcher writes the
+// reports as root). Best-effort: failures are logged, not fatal.
+func (k *KarateRunner) chownToUser(ctx context.Context, reportsAbs string) {
+	uid, gid := os.Getuid(), os.Getgid()
+	if uid < 0 || gid < 0 {
+		return // not a Unix host
+	}
+
+	id, err := k.docker.CreateContainer(ctx, &docker.ContainerConfig{
+		Image:      k.image,
+		Entrypoint: []string{"chown"},
+		Cmd:        []string{"-R", fmt.Sprintf("%d:%d", uid, gid), reportsTarget},
+		Mounts:     []docker.Mount{{Type: "bind", Source: reportsAbs, Target: reportsTarget}},
+		Labels:     map[string]string{"managed-by": "gtool", "gtool-role": "chown"},
+	})
+	if err != nil {
+		k.logger.Warn("could not create chown container", zap.Error(err))
+		return
+	}
+	defer func() { _ = k.docker.RemoveContainer(context.Background(), id, true) }()
+
+	if err := k.docker.StartContainer(ctx, id); err != nil {
+		k.logger.Warn("could not start chown container", zap.Error(err))
+		return
+	}
+	if err := k.docker.WaitForContainer(ctx, id, container.WaitConditionNotRunning); err != nil {
+		k.logger.Warn("chown container did not finish cleanly", zap.Error(err))
+	}
+}
+
 // Run mounts the feature files into the launcher container, runs it on the host
 // network (so the tests can reach the app and mocks on localhost), and reports
 // the outcome from the container exit code.
@@ -77,6 +142,9 @@ func (k *KarateRunner) Run(ctx context.Context, cfg *config.Config) (*plugin.Tes
 	var env []string
 	if tc.Tags != "" {
 		env = append(env, "TAGS="+tc.Tags)
+	}
+	if host := pubsubEmulatorHost(cfg); host != "" {
+		env = append(env, "PUBSUB_EMULATOR_HOST="+host)
 	}
 
 	if err := k.docker.EnsureImage(ctx, k.image); err != nil {
@@ -120,6 +188,12 @@ func (k *KarateRunner) Run(ctx context.Context, cfg *config.Config) (*plugin.Tes
 
 	logs, _ := k.docker.GetContainerLogs(ctx, containerID, 1000)
 	k.logger.Info("tests finished", zap.Int("exit-code", exitCode))
+
+	if tc.ReportsPath != "" {
+		if reportsAbs, err := filepath.Abs(tc.ReportsPath); err == nil {
+			k.chownToUser(ctx, reportsAbs)
+		}
+	}
 
 	return buildResult(exitCode, time.Since(start), tc.ReportsPath, logs), nil
 }

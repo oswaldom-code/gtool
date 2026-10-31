@@ -1,0 +1,30 @@
+version: v1
+
+# The application under test: built from the Dockerfile in this directory.
+app-technology: golang
+app-config:
+  docker-image: kafka-app:latest
+  port: 8080
+  environment:
+    # Listener for clients running in containers, advertised by the broker as
+    # host.docker.internal:9094 (the host gateway gtool maps on the app container).
+    KAFKA_BROKERS: host.docker.internal:9094
+    TOPIC: orders
+
+# Backend API tests (Karate).
+test-launcher: test-launcher-back
+test-config:
+  features-path: ./test/component/features
+  reports-path: ./test/component/reports
+  tags: smoke
+
+# Mock dependencies started by gtool.
+third-party:
+  mocks:
+    - kafka
+  mock-config:
+    kafka:
+      # The launcher's kafka/*.feature helpers expect the broker on localhost:9092.
+      port: "9092"
+      topics:
+        - orders

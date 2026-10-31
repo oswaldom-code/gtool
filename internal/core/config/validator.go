@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/http"
 	"os"
+	"strings"
 
 	"github.com/oswaldom-code/gtool/pkg/config"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
@@ -13,6 +15,10 @@ var (
 	supportedTechnologies = []string{"golang", "nodejs", "generic"}
 	supportedLaunchers    = []string{"test-launcher-back", "test-launcher-front"}
 	supportedMocks        = []string{"mountebank", "couchbase", "postgresql", "kafka", "pubsub", "gcs", "redis", "mongodb", "mysql", "minio", "floci"}
+	supportedHTTPMethods  = []string{
+		http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodOptions,
+	}
 )
 
 type Validator struct {
@@ -54,6 +60,10 @@ func (v *Validator) Validate(cfg *config.Config) error {
 
 	if err := v.validateOrchestration(cfg); err != nil {
 		errors = append(errors, err.Error())
+	}
+
+	if cfg.StressConfig != nil {
+		errors = append(errors, v.stressErrors(cfg.StressConfig)...)
 	}
 
 	if len(errors) > 0 {
@@ -159,6 +169,121 @@ func (v *Validator) validateOrchestration(cfg *config.Config) error {
 		return fmt.Errorf("orchestration.health-check-retries must be positive")
 	}
 
+	return nil
+}
+
+func (v *Validator) validateStressSource(src config.StressSource) []string {
+	var errs []string
+	if v.checkPaths && src.OpenAPI != "" {
+		if _, err := os.Stat(src.OpenAPI); os.IsNotExist(err) {
+			errs = append(errs, fmt.Sprintf("stress-config.source.openapi does not exist: %s", src.OpenAPI))
+		}
+	}
+	for _, m := range src.Methods {
+		if !contains(supportedHTTPMethods, strings.ToUpper(m)) {
+			errs = append(errs, fmt.Sprintf("unsupported stress-config.source.methods value '%s'. Supported: %v", m, supportedHTTPMethods))
+		}
+	}
+	if src.BasePath != "" && !strings.HasPrefix(src.BasePath, "/") {
+		errs = append(errs, "stress-config.source.base-path must start with '/'")
+	}
+	for opID, o := range src.OperationOverrides {
+		if o.Weight < 0 {
+			errs = append(errs, fmt.Sprintf("stress-config.source.operation-overrides.%s.weight must not be negative", opID))
+		}
+		if v.checkPaths && o.BodyFile != "" {
+			if _, err := os.Stat(o.BodyFile); os.IsNotExist(err) {
+				errs = append(errs, fmt.Sprintf("stress-config.source.operation-overrides.%s.body-file does not exist: %s", opID, o.BodyFile))
+			}
+		}
+	}
+	return errs
+}
+
+func (v *Validator) validateStressTargets(targets []config.StressTarget) []string {
+	var errs []string
+	for i, t := range targets {
+		prefix := fmt.Sprintf("stress-config.targets[%d]", i)
+		if !contains(supportedHTTPMethods, strings.ToUpper(t.Method)) {
+			errs = append(errs, fmt.Sprintf("%s.method '%s' is not supported. Supported: %v", prefix, t.Method, supportedHTTPMethods))
+		}
+		if !strings.HasPrefix(t.Path, "/") {
+			errs = append(errs, fmt.Sprintf("%s.path must start with '/'", prefix))
+		}
+		if t.Body != "" && t.BodyFile != "" {
+			errs = append(errs, fmt.Sprintf("%s: body and body-file are mutually exclusive", prefix))
+		}
+		if t.Weight < 0 {
+			errs = append(errs, fmt.Sprintf("%s.weight must not be negative", prefix))
+		}
+		if v.checkPaths && t.BodyFile != "" {
+			if _, err := os.Stat(t.BodyFile); os.IsNotExist(err) {
+				errs = append(errs, fmt.Sprintf("%s.body-file does not exist: %s", prefix, t.BodyFile))
+			}
+		}
+	}
+	return errs
+}
+
+func validateStressRamp(r config.StressRamp) []string {
+	var errs []string
+	if r.StartRPS <= 0 {
+		errs = append(errs, "stress-config.ramp.start-rps must be positive")
+	}
+	if r.MaxRPS < r.StartRPS {
+		errs = append(errs, "stress-config.ramp.max-rps must be greater than or equal to start-rps")
+	}
+	if r.StepRPS < 0 || (r.StepRPS == 0 && r.MaxRPS > r.StartRPS) {
+		errs = append(errs, "stress-config.ramp.step-rps must be positive when max-rps is greater than start-rps")
+	}
+	if r.StepDuration <= 0 {
+		errs = append(errs, "stress-config.ramp.step-duration must be positive")
+	}
+	return errs
+}
+
+func validateStressThresholds(t config.StressThresholds) []string {
+	var errs []string
+	if t.DegradationLatencyFactor != 0 && t.DegradationLatencyFactor <= 1 {
+		errs = append(errs, "stress-config.thresholds.degradation-latency-factor must be greater than 1")
+	}
+	if t.DegradationP95Ms < 0 {
+		errs = append(errs, "stress-config.thresholds.degradation-p95-ms must not be negative")
+	}
+	if t.BreakErrorRate < 0 || t.BreakErrorRate > 1 {
+		errs = append(errs, "stress-config.thresholds.break-error-rate must be between 0 and 1")
+	}
+	return errs
+}
+
+func (v *Validator) stressErrors(sc *config.StressConfig) []string {
+	var errs []string
+	if sc.Source.OpenAPI == "" && len(sc.Targets) == 0 {
+		errs = append(errs, "stress-config requires source.openapi or at least one entry in targets")
+	}
+	errs = append(errs, v.validateStressSource(sc.Source)...)
+	errs = append(errs, v.validateStressTargets(sc.Targets)...)
+	errs = append(errs, validateStressRamp(sc.Ramp)...)
+	errs = append(errs, validateStressThresholds(sc.Thresholds)...)
+	if sc.MinAcceptableRPS < 0 {
+		errs = append(errs, "stress-config.min-acceptable-rps must not be negative")
+	}
+	if sc.MinAcceptableRPS > sc.Ramp.MaxRPS {
+		errs = append(errs, "stress-config.min-acceptable-rps must not exceed ramp.max-rps")
+	}
+	return errs
+}
+
+// ValidateStress validates only the stress-config block, so `gtool stress`
+// does not require the component-test settings (test-launcher, etc.).
+func (v *Validator) ValidateStress(cfg *config.Config) error {
+	if cfg.StressConfig == nil {
+		return gtErrors.New(gtErrors.ErrConfigInvalid, "stress-config section is required")
+	}
+	if errs := v.stressErrors(cfg.StressConfig); len(errs) > 0 {
+		return gtErrors.New(gtErrors.ErrConfigInvalid,
+			fmt.Sprintf("stress configuration validation failed:\n  - %s", joinErrors(errs)))
+	}
 	return nil
 }
 

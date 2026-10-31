@@ -1,0 +1,36 @@
+version: v1
+app-technology: golang
+app-config:
+  docker-image: postgres-app:latest
+  port: 8080
+test-launcher: test-launcher-back
+
+stress-config:
+  source:
+    openapi: api/swagger.yml
+    base-path: /api/v1
+    methods: [GET]
+    include-tags: [products]
+    exclude-paths: ["/health"]
+    headers:
+      Authorization: "Bearer ${STRESS_TOKEN}"
+    param-values:
+      productId: ["1", "2", "3"]
+    operation-overrides:
+      createOrder: { body-file: test/stress/order.json, weight: 3 }
+  targets:
+    - name: list-users
+      method: GET
+      path: /users
+      weight: 2
+  ramp:
+    start-rps: 10
+    step-rps: 10
+    step-duration: 20s
+    max-rps: 500
+  thresholds:
+    degradation-latency-factor: 2.0
+    degradation-p95-ms: 800
+    break-error-rate: 0.05
+  min-acceptable-rps: 100
+  reports-path: test/stress/reports

@@ -128,6 +128,14 @@ gtool test karate                     # Karate only (mocks and app already up)
 gtool test karate --tags "@smoke" --no-open
 ```
 
+### `gtool stress` — stress testing
+```bash
+gtool stress plan --config configs/stress-example.yml   # resolved targets, no load
+gtool stress --config configs/stress-example.yml        # mocks → app → load ramp → reports → cleanup
+gtool stress --target-url https://staging.example.com   # remote target, skips mocks and app
+```
+Ramps the load in steps over targets resolved from an OpenAPI contract (Swagger 2.0 / OpenAPI 3.x) and/or an explicit `targets` list, and reports the **degradation point** (p95 over a factor of the baseline or an absolute SLO, or throughput below 90% of the requested rate) and the **breaking point** (5xx + network error rate over the threshold). Writes `stress-report.json` (stable schema for CI) and a self-contained `stress-report.html`, and exits non-zero when the sustained load is below `min-acceptable-rps`. See the [`stress-config` example](configs/stress-example.yml).
+
 ### `gtool generate` / `gtool version`
 ```bash
 gtool generate config                 # generates a sample component-config.yml
@@ -153,6 +161,25 @@ third-party:
       topics:
         - topic-id: my-topic
           subscription-ids: [my-sub]
+```
+
+### `stress-config` — stress testing (for `gtool stress`)
+```yaml
+stress-config:
+  source:
+    openapi: api/swagger.yml        # Swagger 2.0 or OpenAPI 3.x
+    methods: [GET]                  # default: GET only
+    include-tags: [products]
+    exclude-paths: ["/health"]
+    headers: { Authorization: "Bearer ${STRESS_TOKEN}" }
+    param-values: { productId: ["1", "2", "3"] }
+    operation-overrides:
+      createOrder: { body-file: test/stress/order.json, weight: 3 }
+  targets: []                       # explicit targets, override spec operations
+  ramp: { start-rps: 10, step-rps: 10, step-duration: 20s, max-rps: 500 }
+  thresholds: { degradation-latency-factor: 2.0, degradation-p95-ms: 800, break-error-rate: 0.05 }
+  min-acceptable-rps: 100
+  reports-path: test/stress/reports
 ```
 
 ### `build-config.yml` — Go binaries and mocks (for `gtool unit`)
@@ -219,6 +246,7 @@ go test -tags=integration ./internal/plugin/services/...
 ## ⚠️ Known limitations
 
 - **Newer mock plugins are lightly tested.** `redis`, `mongodb`, `mysql` and `minio` currently have unit tests only — no Docker integration tests yet. Treat them as experimental.
+- **Stress results are host-relative.** The load generator, the app and the mocks share the host, so `gtool stress` numbers are for comparing commits, not production capacity estimates; use `--target-url` for serious measurements. Container CPU/memory metrics are not collected yet.
 - **Karate result is exit-code based.** Pass/fail comes from the launcher's exit code; there is no per-scenario parsing of the `karate-reports` output.
 
 ---

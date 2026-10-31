@@ -35,17 +35,26 @@ type Outcome struct {
 type Runner struct {
 	engine    *Engine
 	targetURL string
+	tool      ToolInfo
 	logger    *zap.Logger
 	outcome   *Outcome
 }
 
 // NewRunner creates a stress runner. targetURL overrides the app address
-// (http://localhost:<app-config.port>) when set.
-func NewRunner(targetURL string, logger *zap.Logger) *Runner {
+// (http://localhost:<app-config.port>) when set; tool identifies the gtool
+// build in the reports.
+func NewRunner(targetURL string, tool ToolInfo, logger *zap.Logger) *Runner {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Runner{engine: NewEngine(logger), targetURL: targetURL, logger: logger}
+	return &Runner{engine: NewEngine(logger), targetURL: targetURL, tool: tool, logger: logger}
+}
+
+func (r *Runner) mode() string {
+	if r.targetURL != "" {
+		return ModeTargetURL
+	}
+	return ModePipeline
 }
 
 // Outcome returns the result of the last completed run, or nil.
@@ -121,7 +130,8 @@ func (r *Runner) Run(ctx context.Context, cfg *config.Config) (*plugin.TestResul
 		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "stress ramp interrupted")
 	}
 
-	report := NewReport(baseURL, sc, plan, stages, Detect(stages, sc.Thresholds))
+	run := RunInfo{TargetURL: baseURL, Mode: r.mode(), StartedAt: start, Tool: r.tool}
+	report := NewReport(run, sc, plan, stages, Detect(stages, sc.Thresholds))
 	jsonPath, htmlPath, err := report.WriteFiles(reportsPath(sc))
 	if err != nil {
 		return nil, err

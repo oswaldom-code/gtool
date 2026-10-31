@@ -12,6 +12,9 @@ var (
 	BuildDate = "unknown"
 )
 
+// RepositoryURL is the canonical gtool repository.
+const RepositoryURL = "https://github.com/oswaldom-code/gtool"
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",

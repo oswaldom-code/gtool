@@ -1,0 +1,9 @@
+@ignore
+Feature: Consume a message matching expectedMessage, propagating errors
+  # Args: projectId, topicId, subscriptionId, expectedMessage, [ignoreMessageFields, orderingKey, attributes, maxRequestedMessages]
+  # Requires PUBSUB_EMULATOR_HOST; gtool sets it when the pubsub mock is configured.
+
+  Scenario: Consume a message matching expectedMessage, propagating errors
+    * def runOperation = read('classpath:launcher/pubsub/run-operation.js')
+    * def result = runOperation('ConsumeMessageDebug', __arg, true)
+    * match result == 'OK'

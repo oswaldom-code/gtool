@@ -1,0 +1,19 @@
+{
+  "port": 4545,
+  "protocol": "http",
+  "name": "greeting-api",
+  "stubs": [
+    {
+      "predicates": [{ "equals": { "method": "GET", "path": "/greeting" } }],
+      "responses": [
+        {
+          "is": {
+            "statusCode": 200,
+            "headers": { "Content-Type": "application/json" },
+            "body": { "message": "hello from mountebank" }
+          }
+        }
+      ]
+    }
+  ]
+}

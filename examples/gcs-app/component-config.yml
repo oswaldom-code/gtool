@@ -1,0 +1,31 @@
+version: v1
+
+# The application under test: built from the Dockerfile in this directory.
+app-technology: golang
+app-config:
+  docker-image: gcs-app:latest
+  port: 8080
+  environment:
+    # The app container reaches the host-published emulator through the host
+    # gateway that gtool maps to host.docker.internal.
+    STORAGE_EMULATOR_HOST: http://host.docker.internal:9086
+    BUCKET: reports
+    OBJECT: orders/report.json
+
+# Backend API tests (Karate).
+test-launcher: test-launcher-back
+test-config:
+  features-path: ./test/component/features
+  reports-path: ./test/component/reports
+  tags: smoke
+
+# Mock dependencies started by gtool.
+third-party:
+  mocks:
+    - gcs
+  mock-config:
+    gcs:
+      # The launcher's gcs/*.feature helpers expect the emulator on localhost:9086.
+      port: "9086"
+      buckets:
+        - reports

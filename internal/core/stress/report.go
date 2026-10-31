@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -22,15 +23,63 @@ const (
 
 	jsonReportFile = "stress-report.json"
 	htmlReportFile = "stress-report.html"
+
+	// ModePipeline means gtool started the mocks and the app; ModeTargetURL
+	// means the load hit an external --target-url.
+	ModePipeline  = "pipeline"
+	ModeTargetURL = "target-url"
 )
 
 //go:embed report.html.tmpl
 var htmlTemplate string
 
+// ToolInfo identifies the gtool build that produced a report.
+type ToolInfo struct {
+	Name       string `json:"name"`
+	Version    string `json:"version"`
+	Commit     string `json:"commit"`
+	BuildDate  string `json:"build-date"`
+	Repository string `json:"repository"`
+}
+
+// EnvironmentInfo describes the host that generated the load; results are
+// relative to it.
+type EnvironmentInfo struct {
+	Hostname  string `json:"hostname"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+	CPUs      int    `json:"cpus"`
+	GoVersion string `json:"go-version"`
+}
+
+// RunInfo is the run context recorded in the report.
+type RunInfo struct {
+	TargetURL string
+	Mode      string
+	StartedAt time.Time
+	Tool      ToolInfo
+}
+
+func currentEnvironment() EnvironmentInfo {
+	hostname, _ := os.Hostname()
+	return EnvironmentInfo{
+		Hostname:  hostname,
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+		CPUs:      runtime.NumCPU(),
+		GoVersion: runtime.Version(),
+	}
+}
+
 // Report is the stable, serialized outcome of a stress run.
 type Report struct {
 	SchemaVersion    int              `json:"schema-version"`
+	Generator        ToolInfo         `json:"generator"`
+	Environment      EnvironmentInfo  `json:"environment"`
+	Mode             string           `json:"mode"`
+	StartedAt        time.Time        `json:"started-at"`
 	GeneratedAt      time.Time        `json:"generated-at"`
+	DurationMs       float64          `json:"duration-ms"`
 	TargetURL        string           `json:"target-url"`
 	Ramp             RampReport       `json:"ramp"`
 	Thresholds       ThresholdsReport `json:"thresholds"`
@@ -137,12 +186,18 @@ func stageReport(s StageMetrics) StageReport {
 }
 
 // NewReport assembles the report of a run.
-func NewReport(targetURL string, sc *config.StressConfig, plan *Plan, stages []StageMetrics, a Analysis) *Report {
+func NewReport(run RunInfo, sc *config.StressConfig, plan *Plan, stages []StageMetrics, a Analysis) *Report {
 	th := WithDefaults(sc.Thresholds)
+	now := time.Now().UTC()
 	r := &Report{
 		SchemaVersion: ReportSchemaVersion,
-		GeneratedAt:   time.Now().UTC(),
-		TargetURL:     targetURL,
+		Generator:     run.Tool,
+		Environment:   currentEnvironment(),
+		Mode:          run.Mode,
+		StartedAt:     run.StartedAt.UTC(),
+		GeneratedAt:   now,
+		DurationMs:    ms(now.Sub(run.StartedAt)),
+		TargetURL:     run.TargetURL,
 		Ramp: RampReport{
 			StartRPS:     sc.Ramp.StartRPS,
 			StepRPS:      sc.Ramp.StepRPS,
@@ -193,6 +248,8 @@ func (r *Report) WriteHTML(w io.Writer) error {
 		LatencyChart:  latencyChart(r),
 		ErrorChart:    errorChart(r),
 		GeneratedText: r.GeneratedAt.Format(time.RFC1123),
+		StartedText:   r.StartedAt.Format(time.RFC1123),
+		DurationText:  time.Duration(r.DurationMs * float64(time.Millisecond)).Round(time.Second).String(),
 	})
 }
 
@@ -206,7 +263,9 @@ func pointText(p *PointReport) string {
 // WriteSummary prints the per-stage table, both points and the gate verdict.
 func (r *Report) WriteSummary(w io.Writer) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Stress test against %s (%d targets)\n\n", r.TargetURL, len(r.Targets))
+	fmt.Fprintf(&b, "Stress test against %s (%d targets)\n", r.TargetURL, len(r.Targets))
+	fmt.Fprintf(&b, "%s %s (commit %s) on %s, %s/%s, %d CPUs\n\n", r.Generator.Name, r.Generator.Version,
+		r.Generator.Commit, r.Environment.Hostname, r.Environment.OS, r.Environment.Arch, r.Environment.CPUs)
 
 	// The tabwriter wraps a strings.Builder: writes cannot fail and Flush
 	// reports any formatting error.

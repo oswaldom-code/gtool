@@ -62,6 +62,8 @@ type htmlView struct {
 	LatencyChart  chart
 	ErrorChart    chart
 	GeneratedText string
+	StartedText   string
+	DurationText  string
 }
 
 // niceMax rounds v up to 1, 2 or 5 times a power of ten.

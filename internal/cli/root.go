@@ -17,6 +17,7 @@ import (
 	"github.com/oswaldom-code/gtool/internal/cli/stress"
 	"github.com/oswaldom-code/gtool/internal/cli/test"
 	"github.com/oswaldom-code/gtool/internal/cli/unit"
+	coreStress "github.com/oswaldom-code/gtool/internal/core/stress"
 )
 
 var (
@@ -58,7 +59,13 @@ func init() {
 	rootCmd.AddCommand(config.NewConfigCmd(&cfgFile))
 	rootCmd.AddCommand(app.NewAppCmd(&cfgFile))
 	rootCmd.AddCommand(test.NewTestCmd(&cfgFile))
-	rootCmd.AddCommand(stress.NewStressCmd(&cfgFile))
+	rootCmd.AddCommand(stress.NewStressCmd(&cfgFile, coreStress.ToolInfo{
+		Name:       "gtool",
+		Version:    Version,
+		Commit:     GitCommit,
+		BuildDate:  BuildDate,
+		Repository: RepositoryURL,
+	}))
 	rootCmd.AddCommand(unit.NewUnitCmd())
 }
 

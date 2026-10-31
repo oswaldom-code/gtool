@@ -48,6 +48,7 @@ stress-config:
 
 type fakeRunner struct {
 	targetURL string
+	tool      coreStress.ToolInfo
 	result    *plugin.TestResult
 	err       error
 	outcome   *coreStress.Outcome
@@ -83,6 +84,8 @@ func (f *fakePipeline) Run(ctx context.Context) (*orchestrator.Result, error) {
 	return &orchestrator.Result{MocksStarted: true, AppStarted: true, Test: res}, err
 }
 
+var cliTool = coreStress.ToolInfo{Name: "gtool", Version: "v9.9.9", Commit: "c0ffee"}
+
 func sampleOutcome(passed bool) *coreStress.Outcome {
 	sc := &config.StressConfig{Ramp: config.StressRamp{StartRPS: 10, MaxRPS: 10}, MinAcceptableRPS: 10}
 	stages := []coreStress.StageMetrics{{RequestedRPS: 10, Throughput: 10}}
@@ -90,7 +93,7 @@ func sampleOutcome(passed bool) *coreStress.Outcome {
 		stages[0].ErrorRate = 1
 	}
 	plan := &coreStress.Plan{Targets: []coreStress.Target{{Name: "t", Method: "GET", Path: "/"}}}
-	report := coreStress.NewReport("http://app", sc, plan, stages, coreStress.Detect(stages, sc.Thresholds))
+	report := coreStress.NewReport(coreStress.RunInfo{TargetURL: "http://app", Tool: cliTool}, sc, plan, stages, coreStress.Detect(stages, sc.Thresholds))
 	return &coreStress.Outcome{Report: report, JSONPath: "r/stress-report.json", HTMLPath: "r/stress-report.html"}
 }
 
@@ -116,8 +119,8 @@ var _ = Describe("stress command", func() {
 		pipeErr, closed, usedPipe = nil, false, false
 
 		d = deps{
-			newRunner: func(targetURL string, _ *zap.Logger) stressRunner {
-				runner.targetURL = targetURL
+			newRunner: func(targetURL string, tool coreStress.ToolInfo, _ *zap.Logger) stressRunner {
+				runner.targetURL, runner.tool = targetURL, tool
 				return runner
 			},
 			newPipeline: func(cfg *config.Config, tests orchestrator.TestRunner, _ *zap.Logger) (pipeline, func() error, error) {
@@ -130,7 +133,7 @@ var _ = Describe("stress command", func() {
 			},
 		}
 		runCmd = func(args ...string) error {
-			cmd := newStressCmd(&cfgPath, d)
+			cmd := newStressCmd(&cfgPath, cliTool, d)
 			cmd.SetOut(out)
 			cmd.SetErr(out)
 			cmd.SetArgs(args)
@@ -139,7 +142,7 @@ var _ = Describe("stress command", func() {
 	})
 
 	It("is exposed as `stress` with a `plan` subcommand", func() {
-		cmd := NewStressCmd(nil)
+		cmd := NewStressCmd(nil, cliTool)
 		Expect(cmd.Name()).To(Equal("stress"))
 		Expect(cmd.Flags().Lookup("target-url")).NotTo(BeNil())
 		sub, _, err := cmd.Find([]string{"plan"})
@@ -190,6 +193,8 @@ stress-config:
 		It("skips the pipeline and prints the summary and report paths", func() {
 			Expect(runCmd("--target-url", "http://remote:9000")).To(Succeed())
 			Expect(runner.targetURL).To(Equal("http://remote:9000"))
+			Expect(runner.tool).To(Equal(cliTool))
+			Expect(out.String()).To(ContainSubstring("gtool v9.9.9 (commit c0ffee)"))
 			Expect(usedPipe).To(BeFalse())
 			Expect(out.String()).To(ContainSubstring("Stress test against http://app"))
 			Expect(out.String()).To(ContainSubstring("Reports: r/stress-report.json, r/stress-report.html"))

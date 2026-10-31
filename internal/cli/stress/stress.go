@@ -41,7 +41,7 @@ type pipeline interface {
 
 type pipelineFactory func(cfg *config.Config, tests orchestrator.TestRunner, log *zap.Logger) (pipeline, func() error, error)
 
-type runnerFactory func(targetURL string, log *zap.Logger) stressRunner
+type runnerFactory func(targetURL string, tool coreStress.ToolInfo, log *zap.Logger) stressRunner
 
 type deps struct {
 	newPipeline pipelineFactory
@@ -69,8 +69,8 @@ func defaultPipeline(cfg *config.Config, tests orchestrator.TestRunner, log *zap
 
 var defaultDeps = deps{
 	newPipeline: defaultPipeline,
-	newRunner: func(targetURL string, log *zap.Logger) stressRunner {
-		return coreStress.NewRunner(targetURL, log)
+	newRunner: func(targetURL string, tool coreStress.ToolInfo, log *zap.Logger) stressRunner {
+		return coreStress.NewRunner(targetURL, tool, log)
 	},
 }
 
@@ -150,8 +150,9 @@ func newPlanCmd(configFile *string) *cobra.Command {
 
 // execute runs the stress test, through the full pipeline or directly
 // against --target-url.
-func execute(ctx context.Context, cfg *config.Config, targetURL string, d deps, log *zap.Logger) (stressRunner, *plugin.TestResult, error) {
-	runner := d.newRunner(targetURL, log)
+func execute(ctx context.Context, cfg *config.Config, targetURL string, tool coreStress.ToolInfo, d deps,
+	log *zap.Logger) (stressRunner, *plugin.TestResult, error) {
+	runner := d.newRunner(targetURL, tool, log)
 	if targetURL != "" {
 		result, err := runner.Run(ctx, cfg)
 		return runner, result, err
@@ -170,7 +171,7 @@ func execute(ctx context.Context, cfg *config.Config, targetURL string, d deps, 
 	return runner, res.Test, err
 }
 
-func runStress(cmd *cobra.Command, configFile *string, targetURL string, d deps) error {
+func runStress(cmd *cobra.Command, configFile *string, targetURL string, tool coreStress.ToolInfo, d deps) error {
 	log := logger.Default()
 	defer func() { _ = log.Sync() }()
 
@@ -184,7 +185,7 @@ func runStress(cmd *cobra.Command, configFile *string, targetURL string, d deps)
 	}
 
 	out := cmd.OutOrStdout()
-	runner, result, err := execute(ctx, cfg, targetURL, d, log.Logger)
+	runner, result, err := execute(ctx, cfg, targetURL, tool, d, log.Logger)
 	if outcome := runner.Outcome(); outcome != nil {
 		var b strings.Builder
 		b.WriteString("\n")
@@ -209,7 +210,7 @@ func runStress(cmd *cobra.Command, configFile *string, targetURL string, d deps)
 	return nil
 }
 
-func newStressCmd(configFile *string, d deps) *cobra.Command {
+func newStressCmd(configFile *string, tool coreStress.ToolInfo, d deps) *cobra.Command {
 	var targetURL string
 	cmd := &cobra.Command{
 		Use:   "stress",
@@ -228,7 +229,7 @@ stress-config.min-acceptable-rps.`,
 		// A failed gate is not a usage error; keep CI logs clean.
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runStress(cmd, configFile, targetURL, d)
+			return runStress(cmd, configFile, targetURL, tool, d)
 		},
 	}
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "hit this base URL instead of starting mocks and app")
@@ -236,7 +237,8 @@ stress-config.min-acceptable-rps.`,
 	return cmd
 }
 
-// NewStressCmd builds the `stress` command and its `plan` subcommand.
-func NewStressCmd(configFile *string) *cobra.Command {
-	return newStressCmd(configFile, defaultDeps)
+// NewStressCmd builds the `stress` command and its `plan` subcommand. tool
+// identifies the gtool build in the reports.
+func NewStressCmd(configFile *string, tool coreStress.ToolInfo) *cobra.Command {
+	return newStressCmd(configFile, tool, defaultDeps)
 }

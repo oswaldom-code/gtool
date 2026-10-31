@@ -32,7 +32,7 @@ type fakeDocker struct {
 	startedID string
 }
 
-func (d *fakeDocker) PullImage(_ context.Context, image string) error {
+func (d *fakeDocker) EnsureImage(_ context.Context, image string) error {
 	d.pulled = image
 	return d.pullErr
 }
@@ -88,6 +88,7 @@ func TestDockerManager_Start(t *testing.T) {
 		assert.Equal(t, map[string]string{"8080": "8080"}, d.created.PortBindings)
 		assert.Contains(t, d.created.Env, "FOO=bar")
 		assert.Equal(t, "app", d.created.Labels["gtool-role"])
+		assert.Equal(t, []string{"host.docker.internal:host-gateway"}, d.created.ExtraHosts)
 	})
 
 	t.Run("requires docker image", func(t *testing.T) {
@@ -109,7 +110,7 @@ func TestDockerManager_Start(t *testing.T) {
 		assert.Contains(t, err.Error(), "already running")
 	})
 
-	t.Run("wraps pull failure", func(t *testing.T) {
+	t.Run("wraps image failure", func(t *testing.T) {
 		d := &fakeDocker{pullErr: errors.New("boom")}
 		m := NewDockerManager(d, nil)
 

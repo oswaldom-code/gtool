@@ -40,6 +40,7 @@ type ContainerConfig struct {
 	Init         bool
 	User         string
 	Labels       map[string]string
+	ExtraHosts   []string
 }
 
 type Mount struct {
@@ -172,6 +173,7 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 		PortBindings: portBindings,
 		Mounts:       mounts,
 		AutoRemove:   config.AutoRemove,
+		ExtraHosts:   config.ExtraHosts,
 	}
 
 	if config.NetworkMode != "" {

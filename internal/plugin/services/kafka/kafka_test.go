@@ -133,7 +133,7 @@ func TestBrokerEnv(t *testing.T) {
 	env := p.brokerEnv(&KafkaConfig{Port: "19092"})
 
 	// External listener must be advertised on the configured host port.
-	assert.Contains(t, env, "KAFKA_ADVERTISED_LISTENERS=INTERNAL://localhost:29092,EXTERNAL://localhost:19092")
+	assert.Contains(t, env, "KAFKA_ADVERTISED_LISTENERS=INTERNAL://localhost:29092,EXTERNAL://localhost:19092,DOCKER://host.docker.internal:9094")
 	assert.Contains(t, env, "KAFKA_PROCESS_ROLES=broker,controller")
 	assert.Contains(t, env, "KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL")
 }

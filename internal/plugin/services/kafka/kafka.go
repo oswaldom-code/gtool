@@ -23,6 +23,9 @@ const (
 	// (health check, topic creation). It is independent of the host port so it
 	// works regardless of how the external listener is mapped.
 	internalBootstrap = "localhost:29092"
+	// dockerListenerPort serves clients running in other containers (e.g. the
+	// app under test), advertised through the host gateway.
+	dockerListenerPort = "9094"
 	// kafkaTopicsBin is the path to the kafka-topics CLI in the apache/kafka image.
 	kafkaTopicsBin = "/opt/kafka/bin/kafka-topics.sh"
 )
@@ -82,7 +85,8 @@ func (p *KafkaPlugin) Launch(ctx context.Context, config map[string]interface{})
 		Name:  cfg.ContainerName,
 		Env:   p.brokerEnv(cfg),
 		PortBindings: map[string]string{
-			"9092": cfg.Port,
+			"9092":             cfg.Port,
+			dockerListenerPort: dockerListenerPort,
 		},
 		Labels: map[string]string{
 			"managed-by": "gtool",
@@ -329,17 +333,19 @@ func (p *KafkaPlugin) parseConfig(config map[string]interface{}) (*KafkaConfig, 
 	return cfg, nil
 }
 
-// brokerEnv builds the KRaft single-node broker environment. Two PLAINTEXT
-// listeners are used: INTERNAL for in-container admin operations and EXTERNAL
-// (advertised on the host port) for clients running on the host.
+// brokerEnv builds the KRaft single-node broker environment. Three PLAINTEXT
+// listeners are used: INTERNAL for in-container admin operations, EXTERNAL
+// (advertised on the host port) for clients running on the host, and DOCKER
+// (advertised through host.docker.internal) for clients in other containers.
 func (p *KafkaPlugin) brokerEnv(cfg *KafkaConfig) []string {
 	return []string{
 		"KAFKA_NODE_ID=1",
 		"KAFKA_PROCESS_ROLES=broker,controller",
 		"KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093",
-		"KAFKA_LISTENERS=INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093",
-		fmt.Sprintf("KAFKA_ADVERTISED_LISTENERS=INTERNAL://%s,EXTERNAL://localhost:%s", internalBootstrap, cfg.Port),
-		"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT",
+		"KAFKA_LISTENERS=INTERNAL://:29092,EXTERNAL://:9092,DOCKER://:9094,CONTROLLER://:9093",
+		fmt.Sprintf("KAFKA_ADVERTISED_LISTENERS=INTERNAL://%s,EXTERNAL://localhost:%s,DOCKER://host.docker.internal:%s",
+			internalBootstrap, cfg.Port, dockerListenerPort),
+		"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,DOCKER:PLAINTEXT",
 		"KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL",
 		"KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER",
 		"KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1",

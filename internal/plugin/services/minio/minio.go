@@ -22,7 +22,10 @@ const (
 	containerNamePrefix = "gtool-minio"
 )
 
-// MinIOPlugin implements the ServicePlugin interface for MinIO (S3-compatible storage)
+// MinIOPlugin implements the ServicePlugin interface for MinIO (S3-compatible storage).
+//
+// Deprecated: the upstream MinIO repository is archived and its images no
+// longer receive updates. Use the floci plugin for S3.
 type MinIOPlugin struct {
 	docker      *docker.Client
 	logger      *zap.Logger
@@ -60,6 +63,7 @@ func (p *MinIOPlugin) Name() string {
 // Launch starts the MinIO service with given configuration
 func (p *MinIOPlugin) Launch(ctx context.Context, config map[string]interface{}) error {
 	p.logger.Info("launching MinIO service")
+	p.logger.Warn("the minio mock is deprecated: upstream MinIO is no longer maintained, use the floci mock for S3")
 
 	// Parse configuration
 	cfg, err := p.parseConfig(config)

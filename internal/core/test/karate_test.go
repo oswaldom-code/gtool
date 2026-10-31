@@ -3,6 +3,8 @@ package test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -23,14 +25,18 @@ type fakeDocker struct {
 	startErr  error
 	waitErr   error
 
-	created  *docker.ContainerConfig
-	removed  bool
-	logsText string
+	created    *docker.ContainerConfig // first container: the launcher
+	createdAll []*docker.ContainerConfig
+	removed    bool
+	logsText   string
 }
 
 func (d *fakeDocker) EnsureImage(_ context.Context, _ string) error { return d.pullErr }
 func (d *fakeDocker) CreateContainer(_ context.Context, c *docker.ContainerConfig) (string, error) {
-	d.created = c
+	if d.created == nil {
+		d.created = c
+	}
+	d.createdAll = append(d.createdAll, c)
 	if d.createErr != nil {
 		return "", d.createErr
 	}
@@ -116,6 +122,73 @@ func TestKarateRunner_MountsFeaturesAndReports(t *testing.T) {
 	assert.Equal(t, featuresTarget, d.created.Mounts[0].Target)
 	assert.True(t, d.created.Mounts[0].ReadOnly)
 	assert.Equal(t, reportsTarget, d.created.Mounts[1].Target)
+}
+
+func TestKarateRunner_ChownsReportsToUser(t *testing.T) {
+	cfg := cfgWithFeatures(t)
+	cfg.TestConfig.ReportsPath = filepath.Join(t.TempDir(), "reports")
+	d := &fakeDocker{exitCode: 0}
+	r := NewKarateRunner(d, "", nil)
+
+	_, err := r.Run(context.Background(), cfg)
+	require.NoError(t, err)
+
+	require.Len(t, d.createdAll, 2, "launcher plus chown container")
+	chown := d.createdAll[1]
+	assert.Equal(t, []string{"chown"}, chown.Entrypoint)
+	assert.Equal(t, []string{"-R", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), reportsTarget}, chown.Cmd)
+	require.Len(t, chown.Mounts, 1)
+	assert.Equal(t, cfg.TestConfig.ReportsPath, chown.Mounts[0].Source)
+	assert.Equal(t, "chown", chown.Labels["gtool-role"])
+}
+
+func TestKarateRunner_NoChownWithoutReports(t *testing.T) {
+	d := &fakeDocker{exitCode: 0}
+	r := NewKarateRunner(d, "", nil)
+
+	_, err := r.Run(context.Background(), cfgWithFeatures(t))
+	require.NoError(t, err)
+
+	assert.Len(t, d.createdAll, 1, "only the launcher container")
+}
+
+func TestPubsubEmulatorHost(t *testing.T) {
+	tests := []struct {
+		name  string
+		mocks []string
+		cfg   interface{}
+		want  string
+	}{
+		{name: "pubsub not configured", mocks: []string{"postgresql"}, want: ""},
+		{name: "default port", mocks: []string{"pubsub"}, want: "127.0.0.1:8085"},
+		{name: "string port", mocks: []string{"pubsub"}, cfg: map[string]interface{}{"port": "9085"}, want: "127.0.0.1:9085"},
+		{name: "int port", mocks: []string{"pubsub"}, cfg: map[string]interface{}{"port": 9086}, want: "127.0.0.1:9086"},
+		{name: "float port", mocks: []string{"pubsub"}, cfg: map[string]interface{}{"port": float64(9087)}, want: "127.0.0.1:9087"},
+		{name: "empty port falls back", mocks: []string{"pubsub"}, cfg: map[string]interface{}{"port": ""}, want: "127.0.0.1:8085"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.ThirdParty.Mocks = tt.mocks
+			cfg.ThirdParty.MockConfig = map[string]interface{}{}
+			if tt.cfg != nil {
+				cfg.ThirdParty.MockConfig["pubsub"] = tt.cfg
+			}
+			assert.Equal(t, tt.want, pubsubEmulatorHost(cfg))
+		})
+	}
+}
+
+func TestKarateRunner_InjectsPubSubEmulatorHost(t *testing.T) {
+	cfg := cfgWithFeatures(t)
+	cfg.ThirdParty.Mocks = []string{"pubsub"}
+	d := &fakeDocker{exitCode: 0}
+	r := NewKarateRunner(d, "", nil)
+
+	_, err := r.Run(context.Background(), cfg)
+	require.NoError(t, err)
+
+	assert.Contains(t, d.created.Env, "PUBSUB_EMULATOR_HOST=127.0.0.1:8085")
 }
 
 func TestKarateRunner_InfraErrors(t *testing.T) {

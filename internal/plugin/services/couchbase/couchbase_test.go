@@ -181,19 +181,6 @@ func TestStop_NoContainer(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestStringOrFloat(t *testing.T) {
-	cfg := map[string]interface{}{
-		"s": "value",
-		"f": float64(8091),
-		"e": "",
-	}
-
-	assert.Equal(t, "value", stringOrFloat(cfg, "s", "fallback"))
-	assert.Equal(t, "8091", stringOrFloat(cfg, "f", "fallback"))
-	assert.Equal(t, "fallback", stringOrFloat(cfg, "e", "fallback"))
-	assert.Equal(t, "fallback", stringOrFloat(cfg, "missing", "fallback"))
-}
-
 func TestIntOrFloat(t *testing.T) {
 	cfg := map[string]interface{}{
 		"f":    float64(256),

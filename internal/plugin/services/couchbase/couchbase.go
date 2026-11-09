@@ -9,6 +9,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/svcconfig"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -329,8 +330,8 @@ func (p *CouchbasePlugin) parseConfig(config map[string]interface{}) (*Couchbase
 	if image, ok := config["image"].(string); ok && image != "" {
 		cfg.Image = image
 	}
-	cfg.AdminPort = stringOrFloat(config, "admin-port", cfg.AdminPort)
-	cfg.DataPort = stringOrFloat(config, "data-port", cfg.DataPort)
+	cfg.AdminPort = svcconfig.Port(config, "admin-port", cfg.AdminPort)
+	cfg.DataPort = svcconfig.Port(config, "data-port", cfg.DataPort)
 	if username, ok := config["username"].(string); ok && username != "" {
 		cfg.Username = username
 	}
@@ -437,18 +438,6 @@ func mustParsePort(port string) int {
 		return 0
 	}
 	return p
-}
-
-// stringOrFloat reads a config value that may be a string or a numeric (YAML/JSON
-// may decode ports as float64), returning fallback when absent.
-func stringOrFloat(config map[string]interface{}, key, fallback string) string {
-	if v, ok := config[key].(string); ok && v != "" {
-		return v
-	}
-	if v, ok := config[key].(float64); ok {
-		return fmt.Sprintf("%.0f", v)
-	}
-	return fallback
 }
 
 // intOrFloat reads a positive integer config value (decoded as float64 or int),

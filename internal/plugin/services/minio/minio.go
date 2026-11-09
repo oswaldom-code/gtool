@@ -9,6 +9,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/svcconfig"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -308,16 +309,8 @@ func (p *MinIOPlugin) parseConfig(config map[string]interface{}) (*MinIOConfig, 
 	if image, ok := config["image"].(string); ok && image != "" {
 		cfg.Image = image
 	}
-	if port, ok := config["port"].(string); ok && port != "" {
-		cfg.Port = port
-	} else if port, ok := config["port"].(float64); ok {
-		cfg.Port = fmt.Sprintf("%.0f", port)
-	}
-	if consolePort, ok := config["console-port"].(string); ok && consolePort != "" {
-		cfg.ConsolePort = consolePort
-	} else if consolePort, ok := config["console-port"].(float64); ok {
-		cfg.ConsolePort = fmt.Sprintf("%.0f", consolePort)
-	}
+	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
+	cfg.ConsolePort = svcconfig.Port(config, "console-port", cfg.ConsolePort)
 	if accessKey, ok := config["access-key"].(string); ok && accessKey != "" {
 		cfg.AccessKey = accessKey
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/svcconfig"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -312,13 +313,7 @@ func (p *FlociPlugin) parseConfig(config map[string]interface{}) (*FlociConfig, 
 	if image, ok := config["image"].(string); ok && image != "" {
 		cfg.Image = image
 	}
-	if port, ok := config["port"].(string); ok && port != "" {
-		cfg.Port = port
-	} else if port, ok := config["port"].(float64); ok {
-		cfg.Port = fmt.Sprintf("%.0f", port)
-	} else if port, ok := config["port"].(int); ok {
-		cfg.Port = fmt.Sprintf("%d", port)
-	}
+	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
 	if region, ok := config["region"].(string); ok && region != "" {
 		cfg.Region = region
 	}

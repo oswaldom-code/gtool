@@ -63,6 +63,17 @@ func TestParseConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "custom config with unquoted YAML int port",
+			input: map[string]interface{}{
+				"port": 6380,
+			},
+			want: &RedisConfig{
+				Image: defaultImage,
+				Port:  "6380",
+			},
+			wantErr: false,
+		},
+		{
 			name: "with password",
 			input: map[string]interface{}{
 				"password": "secret",

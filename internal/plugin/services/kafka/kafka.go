@@ -9,6 +9,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/svcconfig"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -43,6 +44,7 @@ type KafkaPlugin struct {
 type KafkaConfig struct {
 	Image         string   `json:"image"`
 	Port          string   `json:"port"`
+	DockerPort    string   `json:"docker-port"`
 	Topics        []string `json:"topics"`
 	Partitions    int      `json:"partitions"`
 	ContainerName string   `json:"container-name"`
@@ -86,7 +88,7 @@ func (p *KafkaPlugin) Launch(ctx context.Context, config map[string]interface{})
 		Env:   p.brokerEnv(cfg),
 		PortBindings: map[string]string{
 			"9092":             cfg.Port,
-			dockerListenerPort: dockerListenerPort,
+			dockerListenerPort: cfg.DockerPort,
 		},
 		Labels: map[string]string{
 			"managed-by": "gtool",
@@ -302,6 +304,7 @@ func (p *KafkaPlugin) parseConfig(config map[string]interface{}) (*KafkaConfig, 
 	cfg := &KafkaConfig{
 		Image:         defaultImage,
 		Port:          defaultPort,
+		DockerPort:    dockerListenerPort,
 		Partitions:    defaultPartitions,
 		ContainerName: fmt.Sprintf("%s-%d", containerNamePrefix, time.Now().Unix()),
 	}
@@ -309,11 +312,8 @@ func (p *KafkaPlugin) parseConfig(config map[string]interface{}) (*KafkaConfig, 
 	if image, ok := config["image"].(string); ok && image != "" {
 		cfg.Image = image
 	}
-	if port, ok := config["port"].(string); ok && port != "" {
-		cfg.Port = port
-	} else if port, ok := config["port"].(float64); ok {
-		cfg.Port = fmt.Sprintf("%.0f", port)
-	}
+	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
+	cfg.DockerPort = svcconfig.Port(config, "docker-port", cfg.DockerPort)
 	if partitions, ok := config["partitions"].(float64); ok && partitions > 0 {
 		cfg.Partitions = int(partitions)
 	} else if partitions, ok := config["partitions"].(int); ok && partitions > 0 {
@@ -344,7 +344,7 @@ func (p *KafkaPlugin) brokerEnv(cfg *KafkaConfig) []string {
 		"KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093",
 		"KAFKA_LISTENERS=INTERNAL://:29092,EXTERNAL://:9092,DOCKER://:9094,CONTROLLER://:9093",
 		fmt.Sprintf("KAFKA_ADVERTISED_LISTENERS=INTERNAL://%s,EXTERNAL://localhost:%s,DOCKER://host.docker.internal:%s",
-			internalBootstrap, cfg.Port, dockerListenerPort),
+			internalBootstrap, cfg.Port, cfg.DockerPort),
 		"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,DOCKER:PLAINTEXT",
 		"KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL",
 		"KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER",

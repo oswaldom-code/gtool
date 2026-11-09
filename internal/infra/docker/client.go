@@ -25,6 +25,7 @@ import (
 type Client struct {
 	cli    *client.Client
 	logger *zap.Logger
+	runID  string
 }
 
 type ContainerConfig struct {
@@ -72,6 +73,14 @@ func NewClient(logger *zap.Logger) (*Client, error) {
 		cli:    cli,
 		logger: logger,
 	}, nil
+}
+
+func (c *Client) SetRunID(id string) {
+	c.runID = sanitizeRunID(id)
+}
+
+func (c *Client) RunID() string {
+	return c.runID
 }
 
 func (c *Client) Close() error {
@@ -126,9 +135,10 @@ func (c *Client) EnsureImage(ctx context.Context, imageName string) error {
 }
 
 func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (string, error) {
+	name := withRunSuffix(config.Name, c.runID)
 	c.logger.Info("creating container",
 		zap.String("image", config.Image),
-		zap.String("name", config.Name))
+		zap.String("name", name))
 
 	// Build port bindings
 	portBindings := nat.PortMap{}
@@ -166,7 +176,7 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 		Env:          config.Env,
 		ExposedPorts: exposedPorts,
 		User:         config.User,
-		Labels:       config.Labels,
+		Labels:       withRunLabel(config.Labels, c.runID),
 	}
 
 	hostConfig := &container.HostConfig{
@@ -191,7 +201,7 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 		hostConfig,
 		&network.NetworkingConfig{},
 		nil,
-		config.Name,
+		name,
 	)
 	if err != nil {
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create container")
@@ -199,7 +209,7 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 
 	c.logger.Info("container created",
 		zap.String("containerID", resp.ID),
-		zap.String("name", config.Name))
+		zap.String("name", name))
 
 	return resp.ID, nil
 }
@@ -254,6 +264,7 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 // (in any state). It is a no-op when no such container exists, mirroring the
 // legacy "remove_container_if_exists" behaviour. Returns true if one was removed.
 func (c *Client) RemoveContainerByName(ctx context.Context, name string) (bool, error) {
+	name = withRunSuffix(name, c.runID)
 	args := filters.NewArgs()
 	args.Add("name", name)
 
@@ -339,7 +350,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail 
 func (c *Client) ListContainersByLabels(ctx context.Context, labels map[string]string) ([]types.Container, error) {
 	// Build filter string
 	filters := filters.NewArgs()
-	for key, value := range labels {
+	for key, value := range withRunLabel(labels, c.runID) {
 		filters.Add("label", fmt.Sprintf("%s=%s", key, value))
 	}
 

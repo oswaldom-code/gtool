@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
+	"github.com/oswaldom-code/gtool/internal/core/ports"
 	"github.com/oswaldom-code/gtool/pkg/config"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
@@ -123,6 +125,12 @@ func (v *Validator) validateAppConfig(cfg *config.Config) error {
 
 	if appCfg.Port < 0 || appCfg.Port > 65535 {
 		return fmt.Errorf("app-config.port must be between 0 and 65535")
+	}
+
+	if hp := strings.TrimSpace(appCfg.HostPort); hp != "" && !strings.EqualFold(hp, ports.Auto) {
+		if n, err := strconv.Atoi(hp); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("app-config.host-port must be \"auto\" or a port between 1 and 65535, got '%s'", appCfg.HostPort)
+		}
 	}
 
 	return nil

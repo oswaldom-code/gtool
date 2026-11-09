@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/oswaldom-code/gtool/internal/core/ports"
 	"github.com/oswaldom-code/gtool/internal/plugin"
 	"github.com/oswaldom-code/gtool/pkg/config"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
@@ -66,7 +67,7 @@ func (r *Runner) baseURL(cfg *config.Config) string {
 	if r.targetURL != "" {
 		return strings.TrimSuffix(r.targetURL, "/")
 	}
-	return fmt.Sprintf("http://localhost:%d", cfg.AppConfig.Port)
+	return fmt.Sprintf("http://localhost:%d", ports.AppHostPort(cfg))
 }
 
 // waitReady polls the base URL until it answers with any HTTP status. A

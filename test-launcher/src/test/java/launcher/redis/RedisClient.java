@@ -4,6 +4,8 @@ import java.util.Map;
 
 import redis.clients.jedis.Jedis;
 
+import launcher.util.RunPorts;
+
 /**
  * Redis helper for seeding and asserting state against a running Redis.
  * Exposed to Karate via Java.type. Each call uses a short-lived connection.
@@ -15,11 +17,12 @@ public class RedisClient {
     private final String password;
 
     /**
-     * @param config {@code host} (default localhost), {@code port} (default 6379), optional {@code password}.
+     * @param config {@code host} (default localhost), {@code port} (default: this run's redis port, else 6379),
+     *               optional {@code password}.
      */
     public RedisClient(final Map<String, Object> config) {
         this.host = config.getOrDefault("host", "localhost").toString();
-        this.port = Integer.parseInt(config.getOrDefault("port", "6379").toString());
+        this.port = Integer.parseInt(config.getOrDefault("port", RunPorts.port("redis", "6379")).toString());
         final Object pwd = config.get("password");
         this.password = pwd != null ? pwd.toString() : null;
     }

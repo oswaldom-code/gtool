@@ -180,6 +180,26 @@ func TestPubsubEmulatorHost(t *testing.T) {
 	}
 }
 
+func TestKarateRunner_InjectsRunPorts(t *testing.T) {
+	cfg := cfgWithFeatures(t)
+	cfg.AppConfig.Port = 8080
+	cfg.AppConfig.HostPort = "41000"
+	cfg.ThirdParty.Mocks = []string{"postgresql"}
+	cfg.ThirdParty.MockConfig = map[string]interface{}{
+		"postgresql": map[string]interface{}{"port": "41001"},
+	}
+	d := &fakeDocker{exitCode: 0}
+	r := NewKarateRunner(d, "", nil)
+
+	_, err := r.Run(context.Background(), cfg)
+	require.NoError(t, err)
+
+	assert.Contains(t, d.created.Env, "GTOOL_APP_URL=http://localhost:41000")
+	assert.Contains(t, d.created.Env, "GTOOL_APP_HOST_PORT=41000")
+	assert.Contains(t, d.created.Env, "GTOOL_APP_PORT=8080")
+	assert.Contains(t, d.created.Env, "GTOOL_POSTGRESQL_PORT=41001")
+}
+
 func TestKarateRunner_InjectsPubSubEmulatorHost(t *testing.T) {
 	cfg := cfgWithFeatures(t)
 	cfg.ThirdParty.Mocks = []string{"pubsub"}

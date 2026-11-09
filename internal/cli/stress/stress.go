@@ -18,6 +18,7 @@ import (
 	coreConfig "github.com/oswaldom-code/gtool/internal/core/config"
 	"github.com/oswaldom-code/gtool/internal/core/mock"
 	"github.com/oswaldom-code/gtool/internal/core/orchestrator"
+	"github.com/oswaldom-code/gtool/internal/core/ports"
 	coreStress "github.com/oswaldom-code/gtool/internal/core/stress"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
@@ -157,6 +158,12 @@ func execute(ctx context.Context, cfg *config.Config, targetURL string, tool cor
 		result, err := runner.Run(ctx, cfg)
 		return runner, result, err
 	}
+
+	values, err := ports.Resolve(cfg, ports.FreePortAllocator())
+	if err != nil {
+		return runner, nil, err
+	}
+	log.Info("resolved ports", zap.Any("ports", values))
 
 	p, closeFn, err := d.newPipeline(cfg, runner, log)
 	if err != nil {

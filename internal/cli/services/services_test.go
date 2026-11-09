@@ -101,6 +101,31 @@ func TestRunServicesLogs_RequiresServiceOrAll(t *testing.T) {
 }
 
 func TestRunServicesUp(t *testing.T) {
+	t.Run("rejects auto ports outside single-invocation pipelines", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "component-config.yml")
+		require.NoError(t, os.WriteFile(path, []byte(`version: v1
+app-technology: generic
+test-launcher: test-launcher-back
+app-config:
+  docker-image: app:1
+third-party:
+  mocks: [postgresql]
+  mock-config:
+    postgresql:
+      port: auto
+`), 0o600))
+		cfgFile = &path
+		t.Cleanup(func() { cfgFile = nil })
+		mgr := &fakeManager{}
+		injectDeps(t, mgr, nil)
+
+		err := runServicesUp(newServicesUpCmd(), nil)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "gtool test")
+		assert.Empty(t, mgr.startedSvc)
+	})
+
 	t.Run("starts requested services", func(t *testing.T) {
 		cfgFile = nil
 		mgr := &fakeManager{}

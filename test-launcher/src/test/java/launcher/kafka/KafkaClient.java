@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import launcher.pubsub.Utils;
+import launcher.util.RunPorts;
 
 /**
  * Minimal Kafka helper. Publishes string messages to a topic on the local broker
@@ -29,7 +30,7 @@ public class KafkaClient {
 
     private static final String KO = "KO";
     private static final String OK = "OK";
-    private static final String BOOTSTRAP_SERVERS = "localhost:9092";
+    private static final String BOOTSTRAP_SERVERS = "localhost:" + RunPorts.port("kafka", "9092");
     private static final int DEFAULT_TIMEOUT_SECONDS = 10;
     private static final Logger logger = LoggerFactory.getLogger(KafkaClient.class);
 

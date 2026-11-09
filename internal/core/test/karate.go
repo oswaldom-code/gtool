@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 
+	"github.com/oswaldom-code/gtool/internal/core/ports"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
 	"github.com/oswaldom-code/gtool/pkg/config"
@@ -93,6 +95,19 @@ func pubsubEmulatorHost(cfg *config.Config) string {
 	return "127.0.0.1:" + port
 }
 
+// runEnv exposes this run's app URL and mock ports (GTOOL_APP_URL,
+// GTOOL_<SVC>_PORT, ...) so features and launcher helpers need no hardcoded
+// ports. Sorted for a deterministic container spec.
+func runEnv(cfg *config.Config) []string {
+	vars := ports.TestEnv(ports.Values(cfg))
+	out := make([]string, 0, len(vars))
+	for k, v := range vars {
+		out = append(out, k+"="+v)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // chownToUser hands ownership of the reports tree back to the invoking user by
 // running chown inside a short-lived root container (the launcher writes the
 // reports as root). Best-effort: failures are logged, not fatal.
@@ -146,6 +161,7 @@ func (k *KarateRunner) Run(ctx context.Context, cfg *config.Config) (*plugin.Tes
 	if host := pubsubEmulatorHost(cfg); host != "" {
 		env = append(env, "PUBSUB_EMULATOR_HOST="+host)
 	}
+	env = append(env, runEnv(cfg)...)
 
 	k.logger.Info("ensuring test launcher image", zap.String("image", k.image))
 	if err := k.docker.EnsureImage(ctx, k.image); err != nil {

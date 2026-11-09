@@ -49,6 +49,7 @@ type AppConfig struct {
 	BinaryPath  string
 	DockerImage string
 	Port        int
+	HostPort    int
 	Environment map[string]string
 	WorkDir     string
 }

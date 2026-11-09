@@ -13,6 +13,7 @@ import (
 	coreConfig "github.com/oswaldom-code/gtool/internal/core/config"
 	"github.com/oswaldom-code/gtool/internal/core/mock"
 	"github.com/oswaldom-code/gtool/internal/core/mock/stablemocks"
+	"github.com/oswaldom-code/gtool/internal/core/ports"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
 	pluginServices "github.com/oswaldom-code/gtool/internal/plugin/services"
@@ -68,6 +69,7 @@ func defaultServiceDeps(cfg *config.Config, log *zap.Logger) (*serviceDeps, erro
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
+	dockerClient.SetRunID(docker.ResolveRunID(false))
 
 	registry := plugin.NewRegistry()
 	if err := pluginServices.RegisterAll(registry, dockerClient, log); err != nil {
@@ -212,6 +214,10 @@ func runServicesUp(cmd *cobra.Command, args []string) error {
 
 	if stableMode {
 		return runStableUp(ctx, log.Logger, args, cfg)
+	}
+
+	if err := ports.Allocate(cfg, ports.NoAuto); err != nil {
+		return err
 	}
 
 	deps, err := newServiceDeps(cfg, log.Logger)

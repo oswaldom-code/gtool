@@ -3,6 +3,9 @@ package test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -83,4 +86,59 @@ func TestRunTest_FactoryFailure(t *testing.T) {
 
 func TestPrintResult_NilSafe(t *testing.T) {
 	printResult(nil) // must not panic
+}
+
+func writePortsConfig(t *testing.T, envValue string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "component-config.yml")
+	content := `version: v1
+app-technology: generic
+test-launcher: test-launcher-back
+app-config:
+  docker-image: app:1
+  port: 8080
+  host-port: auto
+  environment:
+    DB_PORT: "` + envValue + `"
+third-party:
+  mocks: [postgresql]
+  mock-config:
+    postgresql:
+      port: auto
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	cfgFile = &path
+}
+
+func TestRunTest_ResolvesDynamicPorts(t *testing.T) {
+	writePortsConfig(t, "${mocks.postgresql.port}")
+	fp := &fakePipeline{result: &orchestrator.Result{}}
+	orig := newPipeline
+	t.Cleanup(func() { newPipeline = orig; cfgFile = nil })
+	var got *config.Config
+	newPipeline = func(cfg *config.Config, _ *zap.Logger) (*pipelineDeps, error) {
+		got = cfg
+		return &pipelineDeps{pipeline: fp, close: func() error { return nil }}, nil
+	}
+
+	require.NoError(t, runTest(nil, nil))
+
+	pgPort := got.ThirdParty.MockConfig["postgresql"].(map[string]interface{})["port"].(string)
+	_, err := strconv.Atoi(pgPort)
+	assert.NoError(t, err, "auto must be replaced by a numeric port")
+	assert.Equal(t, pgPort, got.AppConfig.Environment["DB_PORT"])
+	_, err = strconv.Atoi(got.AppConfig.HostPort)
+	assert.NoError(t, err)
+}
+
+func TestRunTest_UnresolvedPlaceholder(t *testing.T) {
+	writePortsConfig(t, "${mocks.redis.port}")
+	fp := &fakePipeline{}
+	injectPipeline(t, fp)
+
+	err := runTest(nil, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to resolve ports")
+	assert.False(t, fp.called, "no phase may start with an unresolved address")
 }

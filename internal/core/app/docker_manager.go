@@ -87,14 +87,15 @@ func (m *DockerManager) Start(ctx context.Context, cfg *plugin.AppConfig) error 
 		Image:        cfg.DockerImage,
 		Name:         fmt.Sprintf("%s-%d", appContainerPrefix, time.Now().Unix()),
 		Env:          envSlice(cfg.Environment),
-		PortBindings: portBindings(cfg.Port),
+		PortBindings: portBindings(cfg.Port, cfg.HostPort),
 		ExtraHosts:   []string{hostGatewayAlias},
 		Labels:       appLabels(),
 	}
 
 	m.logger.Info("creating application container",
 		zap.String("image", cfg.DockerImage),
-		zap.Int("port", cfg.Port))
+		zap.Int("port", cfg.Port),
+		zap.Int("host-port", cfg.HostPort))
 
 	containerID, err := m.docker.CreateContainer(ctx, containerConfig)
 	if err != nil {
@@ -199,11 +200,14 @@ func envSlice(env map[string]string) []string {
 	return out
 }
 
-// portBindings maps the application port to the same host port, if set.
-func portBindings(port int) map[string]string {
+// portBindings publishes the application port on hostPort, or on the same
+// port when hostPort is not set.
+func portBindings(port, hostPort int) map[string]string {
 	if port <= 0 {
 		return nil
 	}
-	p := strconv.Itoa(port)
-	return map[string]string{p: p}
+	if hostPort <= 0 {
+		hostPort = port
+	}
+	return map[string]string{strconv.Itoa(port): strconv.Itoa(hostPort)}
 }

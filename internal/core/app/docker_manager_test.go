@@ -92,6 +92,16 @@ func TestDockerManager_Start(t *testing.T) {
 		assert.Equal(t, []string{"host.docker.internal:host-gateway"}, d.created.ExtraHosts)
 	})
 
+	t.Run("publishes on a distinct host port", func(t *testing.T) {
+		d := &fakeDocker{}
+		m := NewDockerManager(d, nil)
+
+		err := m.Start(ctx, &plugin.AppConfig{DockerImage: "myapp:latest", Port: 8080, HostPort: 41234})
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"8080": "41234"}, d.created.PortBindings)
+	})
+
 	t.Run("requires docker image", func(t *testing.T) {
 		m := NewDockerManager(&fakeDocker{}, nil)
 

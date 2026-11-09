@@ -17,6 +17,7 @@ import (
 	"github.com/oswaldom-code/gtool/internal/core/mock"
 	"github.com/oswaldom-code/gtool/internal/core/mock/stablemocks"
 	"github.com/oswaldom-code/gtool/internal/core/orchestrator"
+	"github.com/oswaldom-code/gtool/internal/core/ports"
 	coreTest "github.com/oswaldom-code/gtool/internal/core/test"
 	"github.com/oswaldom-code/gtool/internal/core/test/stablekarate"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
@@ -52,6 +53,8 @@ func defaultPipeline(cfg *config.Config, log *zap.Logger) (*pipelineDeps, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
+	dockerClient.SetRunID(docker.ResolveRunID(true))
+	log.Info("pipeline run", zap.String("run-id", dockerClient.RunID()))
 
 	registry := plugin.NewRegistry()
 	if err := pluginServices.RegisterAll(registry, dockerClient, log); err != nil {
@@ -192,6 +195,12 @@ func runTest(_ *cobra.Command, _ []string) error {
 	if stableMode {
 		return runStableTest(ctx, log.Logger, cfg)
 	}
+
+	values, err := ports.Resolve(cfg, ports.FreePortAllocator())
+	if err != nil {
+		return fmt.Errorf("failed to resolve ports: %w", err)
+	}
+	log.Info("resolved ports", zap.Any("ports", values))
 
 	deps, err := newPipeline(cfg, log.Logger)
 	if err != nil {

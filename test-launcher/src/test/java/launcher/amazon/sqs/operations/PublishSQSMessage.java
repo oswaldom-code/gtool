@@ -13,6 +13,8 @@ import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 import software.amazon.awssdk.services.sqs.model.SqsException;
 
+import launcher.util.RunPorts;
+
 /**
  * Publishes a message to an SQS queue on a local endpoint (e.g. LocalStack).
  * Returns "OK"/"KO". Exposed to Karate via Java.type.
@@ -28,7 +30,7 @@ public class PublishSQSMessage {
 
     private final SqsClient sqsClient = SqsClient.builder()
             .region(Region.US_EAST_1)
-            .endpointOverride(URI.create("http://localhost:4566"))
+            .endpointOverride(URI.create("http://localhost:" + RunPorts.port("floci", "4566")))
             .credentialsProvider(StaticCredentialsProvider.create(
                     AwsBasicCredentials.builder()
                             .accountId("000000000000")

@@ -9,13 +9,15 @@ import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageException;
 import com.google.cloud.storage.StorageOptions;
 
+import launcher.util.RunPorts;
+
 /**
  * Deletes an object from the local GCS emulator (fake-gcs-server). Returns
  * whether the object was deleted.
  */
 public class DeleteObject implements GcsOperation {
 
-    private static final String GCS_SERVER = "http://localhost:9086";
+    private static final String GCS_SERVER = "http://localhost:" + RunPorts.port("gcs", "9086");
     private static final Logger logger = LoggerFactory.getLogger(DeleteObject.class);
 
     @Override

@@ -19,6 +19,7 @@ type AppConfig struct {
 	BinaryPath  string            `yaml:"binary-path" json:"binary-path"`
 	DockerImage string            `yaml:"docker-image" json:"docker-image"`
 	Port        int               `yaml:"port" json:"port"`
+	HostPort    string            `yaml:"host-port" json:"host-port"`
 	Environment map[string]string `yaml:"environment" json:"environment"`
 }
 

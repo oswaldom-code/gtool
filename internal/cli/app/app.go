@@ -12,6 +12,7 @@ import (
 	coreApp "github.com/oswaldom-code/gtool/internal/core/app"
 	"github.com/oswaldom-code/gtool/internal/core/app/nativeapp"
 	coreConfig "github.com/oswaldom-code/gtool/internal/core/config"
+	"github.com/oswaldom-code/gtool/internal/core/ports"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
 	"github.com/oswaldom-code/gtool/pkg/config"
@@ -64,6 +65,7 @@ func defaultAppDeps(log *zap.Logger) (*appDeps, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
+	dockerClient.SetRunID(docker.ResolveRunID(false))
 	return &appDeps{
 		manager: coreApp.NewDockerManager(dockerClient, log),
 		close:   dockerClient.Close,
@@ -153,6 +155,9 @@ func runStart(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
+	if _, err := ports.Resolve(cfg, ports.NoAuto); err != nil {
+		return err
+	}
 
 	deps, err := newAppDeps(log.Logger)
 	if err != nil {
@@ -207,6 +212,9 @@ func runRestart(_ *cobra.Command, _ []string) error {
 	cfg, err := loadConfigOrDefault(configFilePath())
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+	if _, err := ports.Resolve(cfg, ports.NoAuto); err != nil {
+		return err
 	}
 
 	deps, err := newAppDeps(log.Logger)
@@ -288,6 +296,7 @@ func buildAppConfig(cfg *config.Config) *plugin.AppConfig {
 		BinaryPath:  cfg.AppConfig.BinaryPath,
 		DockerImage: cfg.AppConfig.DockerImage,
 		Port:        cfg.AppConfig.Port,
+		HostPort:    ports.AppHostPort(cfg),
 		Environment: cfg.AppConfig.Environment,
 	}
 
@@ -296,6 +305,9 @@ func buildAppConfig(cfg *config.Config) *plugin.AppConfig {
 	}
 	if appPort > 0 {
 		ac.Port = appPort
+		if cfg.AppConfig.HostPort == "" {
+			ac.HostPort = appPort
+		}
 	}
 	if len(appEnv) > 0 {
 		if ac.Environment == nil {

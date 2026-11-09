@@ -13,13 +13,15 @@ import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
 
+import launcher.util.RunPorts;
+
 /**
  * Reads an object from the local GCS emulator (fake-gcs-server). Returns the
  * bytes, or null if the object does not exist.
  */
 public class ReadObject implements GcsOperation {
 
-    private static final String GCS_SERVER = "http://localhost:9086";
+    private static final String GCS_SERVER = "http://localhost:" + RunPorts.port("gcs", "9086");
     private static final Logger logger = LoggerFactory.getLogger(ReadObject.class);
 
     @Override

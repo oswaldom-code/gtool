@@ -184,6 +184,22 @@ func TestBuildAppConfig_FlagOverrides(t *testing.T) {
 
 	assert.Equal(t, "override:2", ac.DockerImage)
 	assert.Equal(t, 2000, ac.Port)
+	assert.Equal(t, 2000, ac.HostPort, "--port also moves the host port when host-port is unset")
 	assert.Equal(t, "1", ac.Environment["A"])
 	assert.Equal(t, "2", ac.Environment["B"])
+}
+
+func TestBuildAppConfig_HostPort(t *testing.T) {
+	t.Cleanup(func() { dockerImage = ""; appPort = 0; appEnv = nil })
+
+	cfg := config.DefaultConfig()
+	cfg.AppConfig.Port = 8080
+	cfg.AppConfig.HostPort = "18080"
+
+	assert.Equal(t, 18080, buildAppConfig(cfg).HostPort)
+
+	appPort = 9090
+	ac := buildAppConfig(cfg)
+	assert.Equal(t, 9090, ac.Port)
+	assert.Equal(t, 18080, ac.HostPort, "explicit host-port wins over --port")
 }

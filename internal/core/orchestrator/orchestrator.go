@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 
+	"github.com/oswaldom-code/gtool/internal/core/ports"
 	"github.com/oswaldom-code/gtool/internal/plugin"
 	"github.com/oswaldom-code/gtool/pkg/config"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
@@ -138,6 +139,7 @@ func buildAppConfig(cfg *config.Config) *plugin.AppConfig {
 		BinaryPath:  cfg.AppConfig.BinaryPath,
 		DockerImage: cfg.AppConfig.DockerImage,
 		Port:        cfg.AppConfig.Port,
+		HostPort:    ports.AppHostPort(cfg),
 		Environment: cfg.AppConfig.Environment,
 	}
 }

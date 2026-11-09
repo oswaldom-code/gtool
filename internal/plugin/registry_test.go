@@ -26,36 +26,10 @@ func (m *mockServicePlugin) GetLogs(ctx context.Context, opts *LogOptions) ([]st
 	return []string{"log1", "log2"}, nil
 }
 
-type mockAppLauncher struct {
-	tech string
-}
-
-func (m *mockAppLauncher) Technology() string                                  { return m.tech }
-func (m *mockAppLauncher) Launch(ctx context.Context, config *AppConfig) error { return nil }
-func (m *mockAppLauncher) IsReady(ctx context.Context) (bool, error)           { return true, nil }
-func (m *mockAppLauncher) Stop(ctx context.Context) error                      { return nil }
-func (m *mockAppLauncher) Restart(ctx context.Context) error                   { return nil }
-func (m *mockAppLauncher) GetPID() (int, error)                                { return 1234, nil }
-
-type mockTestExecutor struct {
-	framework string
-}
-
-func (m *mockTestExecutor) Framework() string { return m.framework }
-func (m *mockTestExecutor) Execute(ctx context.Context, config *TestConfig) (*TestResult, error) {
-	return &TestResult{Total: 10, Passed: 10}, nil
-}
-func (m *mockTestExecutor) Cancel(ctx context.Context) error { return nil }
-func (m *mockTestExecutor) GetProgress(ctx context.Context) (*TestProgress, error) {
-	return &TestProgress{Current: 5, Total: 10}, nil
-}
-
 func TestNewRegistry(t *testing.T) {
 	registry := NewRegistry()
 	assert.NotNil(t, registry)
 	assert.NotNil(t, registry.services)
-	assert.NotNil(t, registry.launchers)
-	assert.NotNil(t, registry.executors)
 }
 
 func TestRegistry_RegisterService(t *testing.T) {
@@ -136,98 +110,6 @@ func TestRegistry_ListServices(t *testing.T) {
 	})
 }
 
-func TestRegistry_RegisterLauncher(t *testing.T) {
-	registry := NewRegistry()
-
-	t.Run("register new launcher", func(t *testing.T) {
-		mock := &mockAppLauncher{tech: "golang"}
-		err := registry.RegisterLauncher(mock)
-		assert.NoError(t, err)
-	})
-
-	t.Run("register duplicate launcher", func(t *testing.T) {
-		mock := &mockAppLauncher{tech: "golang"}
-		err := registry.RegisterLauncher(mock)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "already registered")
-	})
-
-	t.Run("register multiple launchers", func(t *testing.T) {
-		launchers := []*mockAppLauncher{
-			{tech: "nodejs"},
-			{tech: "generic"},
-		}
-
-		for _, launcher := range launchers {
-			err := registry.RegisterLauncher(launcher)
-			assert.NoError(t, err)
-		}
-	})
-}
-
-func TestRegistry_GetLauncher(t *testing.T) {
-	registry := NewRegistry()
-	mock := &mockAppLauncher{tech: "nodejs"}
-	require.NoError(t, registry.RegisterLauncher(mock))
-
-	t.Run("get existing launcher", func(t *testing.T) {
-		launcher, err := registry.GetLauncher("nodejs")
-		assert.NoError(t, err)
-		assert.NotNil(t, launcher)
-		assert.Equal(t, "nodejs", launcher.Technology())
-	})
-
-	t.Run("get non-existent launcher", func(t *testing.T) {
-		launcher, err := registry.GetLauncher("rust")
-		assert.Error(t, err)
-		assert.Nil(t, launcher)
-		assert.Contains(t, err.Error(), "not found")
-	})
-}
-
-func TestRegistry_RegisterExecutor(t *testing.T) {
-	registry := NewRegistry()
-
-	t.Run("register new executor", func(t *testing.T) {
-		mock := &mockTestExecutor{framework: "karate"}
-		err := registry.RegisterExecutor(mock)
-		assert.NoError(t, err)
-	})
-
-	t.Run("register duplicate executor", func(t *testing.T) {
-		mock := &mockTestExecutor{framework: "karate"}
-		err := registry.RegisterExecutor(mock)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "already registered")
-	})
-
-	t.Run("register multiple executors", func(t *testing.T) {
-		mock := &mockTestExecutor{framework: "cypress"}
-		err := registry.RegisterExecutor(mock)
-		assert.NoError(t, err)
-	})
-}
-
-func TestRegistry_GetExecutor(t *testing.T) {
-	registry := NewRegistry()
-	mock := &mockTestExecutor{framework: "test-launcher-back"}
-	require.NoError(t, registry.RegisterExecutor(mock))
-
-	t.Run("get existing executor", func(t *testing.T) {
-		executor, err := registry.GetExecutor("test-launcher-back")
-		assert.NoError(t, err)
-		assert.NotNil(t, executor)
-		assert.Equal(t, "test-launcher-back", executor.Framework())
-	})
-
-	t.Run("get non-existent executor", func(t *testing.T) {
-		executor, err := registry.GetExecutor("jest")
-		assert.Error(t, err)
-		assert.Nil(t, executor)
-		assert.Contains(t, err.Error(), "not found")
-	})
-}
-
 func TestRegistry_ConcurrentAccess(t *testing.T) {
 	registry := NewRegistry()
 
@@ -266,32 +148,15 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 func TestRegistry_FullWorkflow(t *testing.T) {
 	registry := NewRegistry()
 
-	// Register all types of plugins
 	service := &mockServicePlugin{name: "couchbase"}
-	launcher := &mockAppLauncher{tech: "golang"}
-	executor := &mockTestExecutor{framework: "karate"}
 
 	err := registry.RegisterService(service)
-	require.NoError(t, err)
-
-	err = registry.RegisterLauncher(launcher)
-	require.NoError(t, err)
-
-	err = registry.RegisterExecutor(executor)
 	require.NoError(t, err)
 
 	// Retrieve and verify
 	retrievedService, err := registry.GetService("couchbase")
 	require.NoError(t, err)
 	assert.Equal(t, service, retrievedService)
-
-	retrievedLauncher, err := registry.GetLauncher("golang")
-	require.NoError(t, err)
-	assert.Equal(t, launcher, retrievedLauncher)
-
-	retrievedExecutor, err := registry.GetExecutor("karate")
-	require.NoError(t, err)
-	assert.Equal(t, executor, retrievedExecutor)
 }
 
 func BenchmarkRegistry_RegisterService(b *testing.B) {
@@ -338,9 +203,7 @@ func BenchmarkRegistry_ListServices(b *testing.B) {
 	}
 }
 
-func TestRegistry_RejectsNilPlugins(t *testing.T) {
+func TestRegistry_RejectsNilPlugin(t *testing.T) {
 	r := NewRegistry()
 	assert.Error(t, r.RegisterService(nil))
-	assert.Error(t, r.RegisterLauncher(nil))
-	assert.Error(t, r.RegisterExecutor(nil))
 }

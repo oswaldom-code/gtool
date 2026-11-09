@@ -143,13 +143,6 @@ func TestOrchestrator_Run_TestFailure_CleansUpEverything(t *testing.T) {
 	assert.Equal(t, 1, mocks.stopCalls)
 }
 
-func TestStubTestRunner(t *testing.T) {
-	res, err := NewStubTestRunner(nil).Run(context.Background(), config.DefaultConfig())
-
-	require.NoError(t, err)
-	require.NotNil(t, res)
-}
-
 func TestBuildServiceConfigs(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.ThirdParty.Mocks = []string{"postgresql", "kafka"}

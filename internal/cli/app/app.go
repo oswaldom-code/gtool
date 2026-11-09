@@ -4,17 +4,22 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/oswaldom-code/gtool/internal/cli/cliconfig"
 	coreApp "github.com/oswaldom-code/gtool/internal/core/app"
 	"github.com/oswaldom-code/gtool/internal/core/app/nativeapp"
-	coreConfig "github.com/oswaldom-code/gtool/internal/core/config"
+	"github.com/oswaldom-code/gtool/internal/core/ports"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	"github.com/oswaldom-code/gtool/internal/infra/termout"
 	"github.com/oswaldom-code/gtool/internal/plugin"
 	"github.com/oswaldom-code/gtool/pkg/config"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"github.com/oswaldom-code/gtool/pkg/logger"
 )
 
@@ -26,6 +31,7 @@ var (
 	logsTail        int
 	nativeMode      bool
 	buildConfigFile string
+	allRuns         bool
 )
 
 // configFilePath returns the current --config value, dereferenced at run time
@@ -62,8 +68,10 @@ var newAppDeps depsFactory = defaultAppDeps
 func defaultAppDeps(log *zap.Logger) (*appDeps, error) {
 	dockerClient, err := docker.NewClient(log)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Docker client: %w", err)
+		return nil, gtErrors.Wrap(err, gtErrors.ErrDockerConnection, "failed to create Docker client")
 	}
+	dockerClient.SetRunID(docker.ResolveRunID(false))
+	dockerClient.SetAllRuns(allRuns)
 	return &appDeps{
 		manager: coreApp.NewDockerManager(dockerClient, log),
 		close:   dockerClient.Close,
@@ -90,6 +98,8 @@ Examples:
 	cfgFile = configFile
 
 	cmd.AddCommand(newStartCmd(), newStopCmd(), newRestartCmd(), newStatusCmd(), newLogsCmd())
+	cmd.PersistentFlags().BoolVar(&allRuns, "all-runs", false,
+		"without GTOOL_RUN_ID, also act on containers of other gtool runs (e.g. concurrent gtool test pipelines)")
 	return cmd
 }
 
@@ -102,20 +112,22 @@ func newStartCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dockerImage, "docker-image", "", "Docker image to run (overrides config)")
 	cmd.Flags().IntVar(&appPort, "port", 0, "application port (overrides config)")
 	cmd.Flags().StringToStringVar(&appEnv, "env", nil, "environment variables (KEY=VALUE)")
-	cmd.Flags().BoolVar(&nativeMode, "native", false, "launch the build-config binaries as native processes (like legacy 'component r')")
+	cmd.Flags().BoolVar(&nativeMode, "native", false, "launch the build-config binaries as native processes")
 	cmd.Flags().StringVar(&buildConfigFile, "build-config", "build-config.yml", "path to build-config.yml (with --native)")
 	return cmd
 }
 
 func newStopCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "stop", Short: "Stop the application", RunE: runStop}
-	cmd.Flags().BoolVar(&nativeMode, "native", false, "stop the native build-config binaries (like legacy 'component p')")
+	cmd.Flags().BoolVar(&nativeMode, "native", false, "stop the native build-config binaries")
 	cmd.Flags().StringVar(&buildConfigFile, "build-config", "build-config.yml", "path to build-config.yml (with --native)")
 	return cmd
 }
 
 func newRestartCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "restart", Short: "Restart the application", RunE: runRestart}
+	cmd.Flags().BoolVar(&nativeMode, "native", false, "restart the native build-config binaries")
+	cmd.Flags().StringVar(&buildConfigFile, "build-config", "build-config.yml", "path to build-config.yml (with --native)")
 	cmd.Flags().StringVar(&dockerImage, "docker-image", "", "Docker image to run (overrides config)")
 	cmd.Flags().IntVar(&appPort, "port", 0, "application port (overrides config)")
 	cmd.Flags().StringToStringVar(&appEnv, "env", nil, "environment variables (KEY=VALUE)")
@@ -132,10 +144,42 @@ func newLogsCmd() *cobra.Command {
 	return cmd
 }
 
+// applyFlagOverrides applies --docker-image, --port and --env to cfg. It runs
+// before ports.Resolve so placeholders see the overridden values.
+func applyFlagOverrides(cfg *config.Config) {
+	if dockerImage != "" {
+		cfg.AppConfig.DockerImage = dockerImage
+	}
+	if appPort > 0 {
+		cfg.AppConfig.Port = appPort
+	}
+	if len(appEnv) > 0 {
+		if cfg.AppConfig.Environment == nil {
+			cfg.AppConfig.Environment = make(map[string]string, len(appEnv))
+		}
+		for k, v := range appEnv {
+			cfg.AppConfig.Environment[k] = v
+		}
+	}
+}
+
+// buildAppConfig maps the resolved configuration to a plugin.AppConfig.
+func buildAppConfig(cfg *config.Config) *plugin.AppConfig {
+	return &plugin.AppConfig{
+		BinaryName:  cfg.AppConfig.BinaryName,
+		BinaryPath:  cfg.AppConfig.BinaryPath,
+		DockerImage: cfg.AppConfig.DockerImage,
+		Port:        cfg.AppConfig.Port,
+		HostPort:    ports.AppHostPort(cfg),
+		Environment: cfg.AppConfig.Environment,
+	}
+}
+
 func runStart(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	log := logger.Default()
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	if nativeMode {
 		launcher, err := nativeapp.New(log.Logger, buildConfigFile)
@@ -145,36 +189,41 @@ func runStart(_ *cobra.Command, _ []string) error {
 		if err := launcher.Start(ctx); err != nil {
 			return err
 		}
-		fmt.Printf("✅ Native app started. Use 'gtool app stop --native' to stop it.\n")
+		termout.Printf("✅ Native app started. Use 'gtool app stop --native' to stop it.\n")
 		return nil
 	}
 
-	cfg, err := loadConfigOrDefault(configFilePath())
+	cfg, err := cliconfig.Load(configFilePath(), cliconfig.Start, os.Stderr)
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to load configuration")
+	}
+	applyFlagOverrides(cfg)
+	if _, err := ports.Resolve(cfg, ports.NoAuto); err != nil {
+		return err
 	}
 
 	deps, err := newAppDeps(log.Logger)
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	appConfig := buildAppConfig(cfg)
-	fmt.Printf("🚀 Starting application (%s)...\n", appConfig.DockerImage)
+	termout.Printf("🚀 Starting application (%s)...\n", appConfig.DockerImage)
 	if err := deps.manager.Start(ctx, appConfig); err != nil {
-		return fmt.Errorf("failed to start application: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to start application")
 	}
 
-	fmt.Printf("✅ Application started\n")
+	termout.Printf("✅ Application started\n")
 	fmt.Printf("Use 'gtool app status' to check status\n")
 	return nil
 }
 
 func runStop(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	log := logger.Default()
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	if nativeMode {
 		launcher, err := nativeapp.New(log.Logger, buildConfigFile)
@@ -188,64 +237,81 @@ func runStop(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
-	fmt.Println("🛑 Stopping application...")
+	termout.Println("🛑 Stopping application...")
 	if err := deps.manager.Stop(ctx); err != nil {
-		return fmt.Errorf("failed to stop application: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to stop application")
 	}
 
-	fmt.Println("✅ Application stopped")
+	termout.Println("✅ Application stopped")
 	return nil
 }
 
 func runRestart(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	log := logger.Default()
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
-	cfg, err := loadConfigOrDefault(configFilePath())
+	if nativeMode {
+		launcher, err := nativeapp.New(log.Logger, buildConfigFile)
+		if err != nil {
+			return err
+		}
+		if err := launcher.Stop(ctx); err != nil {
+			return err
+		}
+		return launcher.Start(ctx)
+	}
+
+	cfg, err := cliconfig.Load(configFilePath(), cliconfig.Start, os.Stderr)
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to load configuration")
+	}
+	applyFlagOverrides(cfg)
+	if _, err := ports.Resolve(cfg, ports.NoAuto); err != nil {
+		return err
 	}
 
 	deps, err := newAppDeps(log.Logger)
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
-	fmt.Println("🔄 Restarting application...")
+	termout.Println("🔄 Restarting application...")
 	if err := deps.manager.Restart(ctx, buildAppConfig(cfg)); err != nil {
-		return fmt.Errorf("failed to restart application: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to restart application")
 	}
 
-	fmt.Println("✅ Application restarted")
+	termout.Println("✅ Application restarted")
 	return nil
 }
 
 func runStatus(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	log := zap.NewNop()
 
 	deps, err := newAppDeps(log)
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	status, err := deps.manager.Status(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get application status: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to get application status")
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "STATUS\tIMAGE\tPORT")
-	fmt.Fprintln(w, "------\t-----\t----")
+	_, _ = fmt.Fprintln(w, "STATUS\tIMAGE\tPORT")
+	_, _ = fmt.Fprintln(w, "------\t-----\t----")
 
 	state := status.State
 	if status.Running {
-		state = "running ✓"
+		state = termout.Text("running ✓")
 	}
 	image := status.Image
 	if image == "" {
@@ -255,67 +321,28 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	if status.Port > 0 {
 		port = fmt.Sprintf("%d", status.Port)
 	}
-	fmt.Fprintf(w, "%s\t%s\t%s\n", state, image, port)
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", state, image, port)
 	return w.Flush()
 }
 
 func runLogs(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	log := zap.NewNop()
 
 	deps, err := newAppDeps(log)
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
 	logs, err := deps.manager.Logs(ctx, logsTail)
 	if err != nil {
-		return fmt.Errorf("failed to get application logs: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to get application logs")
 	}
 
 	for _, line := range logs {
 		fmt.Println(line)
 	}
 	return nil
-}
-
-// buildAppConfig maps the file configuration to a plugin.AppConfig, applying
-// command-line flag overrides.
-func buildAppConfig(cfg *config.Config) *plugin.AppConfig {
-	ac := &plugin.AppConfig{
-		BinaryName:  cfg.AppConfig.BinaryName,
-		BinaryPath:  cfg.AppConfig.BinaryPath,
-		DockerImage: cfg.AppConfig.DockerImage,
-		Port:        cfg.AppConfig.Port,
-		Environment: cfg.AppConfig.Environment,
-	}
-
-	if dockerImage != "" {
-		ac.DockerImage = dockerImage
-	}
-	if appPort > 0 {
-		ac.Port = appPort
-	}
-	if len(appEnv) > 0 {
-		if ac.Environment == nil {
-			ac.Environment = make(map[string]string, len(appEnv))
-		}
-		for k, v := range appEnv {
-			ac.Environment[k] = v
-		}
-	}
-	return ac
-}
-
-func loadConfigOrDefault(cfgFile string) (*config.Config, error) {
-	if cfgFile != "" {
-		return coreConfig.LoadConfig(cfgFile)
-	}
-
-	cfg, err := coreConfig.LoadConfig("")
-	if err != nil {
-		return config.DefaultConfig(), nil
-	}
-	return cfg, nil
 }

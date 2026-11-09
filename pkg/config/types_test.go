@@ -17,11 +17,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 3*time.Second, cfg.Orchestration.HealthCheckInterval)
 	assert.Equal(t, 60, cfg.Orchestration.HealthCheckRetries)
 	assert.True(t, cfg.Orchestration.CleanupOnFailure)
-	assert.True(t, cfg.Orchestration.PreserveLogs)
-	assert.False(t, cfg.Observability.StructuredLogs)
 	assert.Equal(t, "info", cfg.Observability.LogLevel)
-	assert.True(t, cfg.Observability.MetricsEnabled)
-	assert.Equal(t, "text", cfg.Observability.ReportFormat)
 }
 
 func TestConfigStructure(t *testing.T) {
@@ -41,7 +37,6 @@ func TestConfigStructure(t *testing.T) {
 			Tags:         "@smoke",
 			FeaturesPath: "./features",
 			ReportsPath:  "./reports",
-			Parallel:     true,
 		},
 		ThirdParty: ThirdPartyConfig{
 			Mocks: []string{"couchbase", "pubsub"},
@@ -57,13 +52,9 @@ func TestConfigStructure(t *testing.T) {
 			HealthCheckInterval: 3 * time.Second,
 			HealthCheckRetries:  60,
 			CleanupOnFailure:    true,
-			PreserveLogs:        true,
 		},
 		Observability: ObservabilityConfig{
-			StructuredLogs: true,
-			LogLevel:       "debug",
-			MetricsEnabled: true,
-			ReportFormat:   "json",
+			LogLevel: "debug",
 		},
 	}
 
@@ -82,7 +73,6 @@ func TestConfigStructure(t *testing.T) {
 	assert.Equal(t, "@smoke", cfg.TestConfig.Tags)
 	assert.Equal(t, "./features", cfg.TestConfig.FeaturesPath)
 	assert.Equal(t, "./reports", cfg.TestConfig.ReportsPath)
-	assert.True(t, cfg.TestConfig.Parallel)
 
 	// Test third party
 	assert.Len(t, cfg.ThirdParty.Mocks, 2)
@@ -96,10 +86,7 @@ func TestConfigStructure(t *testing.T) {
 	assert.Equal(t, 60, cfg.Orchestration.HealthCheckRetries)
 
 	// Test observability
-	assert.True(t, cfg.Observability.StructuredLogs)
 	assert.Equal(t, "debug", cfg.Observability.LogLevel)
-	assert.True(t, cfg.Observability.MetricsEnabled)
-	assert.Equal(t, "json", cfg.Observability.ReportFormat)
 }
 
 func TestAppConfig(t *testing.T) {
@@ -126,13 +113,11 @@ func TestTestConfig(t *testing.T) {
 		Tags:         "@integration",
 		FeaturesPath: "/app/features",
 		ReportsPath:  "/app/reports",
-		Parallel:     false,
 	}
 
 	assert.Equal(t, "@integration", testCfg.Tags)
 	assert.Equal(t, "/app/features", testCfg.FeaturesPath)
 	assert.Equal(t, "/app/reports", testCfg.ReportsPath)
-	assert.False(t, testCfg.Parallel)
 }
 
 func TestThirdPartyConfig(t *testing.T) {
@@ -161,7 +146,6 @@ func TestOrchestrationConfig(t *testing.T) {
 		HealthCheckInterval: 5 * time.Second,
 		HealthCheckRetries:  30,
 		CleanupOnFailure:    false,
-		PreserveLogs:        false,
 	}
 
 	assert.False(t, orch.ParallelMocks)
@@ -169,21 +153,14 @@ func TestOrchestrationConfig(t *testing.T) {
 	assert.Equal(t, 5*time.Second, orch.HealthCheckInterval)
 	assert.Equal(t, 30, orch.HealthCheckRetries)
 	assert.False(t, orch.CleanupOnFailure)
-	assert.False(t, orch.PreserveLogs)
 }
 
 func TestObservabilityConfig(t *testing.T) {
 	obs := ObservabilityConfig{
-		StructuredLogs: true,
-		LogLevel:       "warn",
-		MetricsEnabled: false,
-		ReportFormat:   "html",
+		LogLevel: "warn",
 	}
 
-	assert.True(t, obs.StructuredLogs)
 	assert.Equal(t, "warn", obs.LogLevel)
-	assert.False(t, obs.MetricsEnabled)
-	assert.Equal(t, "html", obs.ReportFormat)
 }
 
 func BenchmarkDefaultConfig(b *testing.B) {

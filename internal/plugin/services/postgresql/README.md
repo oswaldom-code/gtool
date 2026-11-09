@@ -17,8 +17,8 @@
 ```go
 import (
     "context"
-    "github.com/oswaldo-montano/gtool/internal/infra/docker"
-    "github.com/oswaldo-montano/gtool/internal/plugin/services/postgresql"
+    "github.com/oswaldom-code/gtool/internal/infra/docker"
+    "github.com/oswaldom-code/gtool/internal/plugin/services/postgresql"
 )
 
 // Create plugin

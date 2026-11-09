@@ -7,10 +7,13 @@ import (
 )
 
 var (
-	Version   = "0.1.0"
+	Version   = "1.0.0"
 	GitCommit = "dev"
 	BuildDate = "unknown"
 )
+
+// RepositoryURL is the canonical gtool repository.
+const RepositoryURL = "https://github.com/oswaldom-code/gtool"
 
 var versionCmd = &cobra.Command{
 	Use:   "version",

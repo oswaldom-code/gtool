@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/svcconfig"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -21,6 +22,19 @@ const (
 	defaultProjectID    = "test-project"
 	containerNamePrefix = "gtool-gcs"
 )
+
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "port", "project-id", "buckets", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"port": defaultPort,
+	}
+}
 
 // GCSPlugin implements the ServicePlugin interface for the fake-gcs-server
 // Google Cloud Storage emulator.
@@ -69,9 +83,9 @@ func (p *GCSPlugin) Launch(ctx context.Context, config map[string]interface{}) e
 	}
 	p.config = cfg
 
-	p.logger.Info("pulling GCS image", zap.String("image", cfg.Image))
-	if err := p.docker.PullImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull GCS image")
+	p.logger.Info("ensuring GCS image", zap.String("image", cfg.Image))
+	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get GCS image")
 	}
 
 	containerConfig := &docker.ContainerConfig{
@@ -91,16 +105,11 @@ func (p *GCSPlugin) Launch(ctx context.Context, config map[string]interface{}) e
 		zap.String("name", cfg.ContainerName),
 		zap.String("port", cfg.Port))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create GCS container")
-	}
-	p.containerID = containerID
-
-	p.logger.Info("starting GCS container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start GCS container")
 	}
+	p.containerID = containerID
 
 	p.logger.Info("waiting for GCS emulator to be ready")
 	if err := p.waitForReady(ctx); err != nil {
@@ -113,8 +122,8 @@ func (p *GCSPlugin) Launch(ctx context.Context, config map[string]interface{}) e
 	if len(cfg.Buckets) > 0 {
 		p.logger.Info("creating buckets", zap.Strings("buckets", cfg.Buckets))
 		if err := p.createBuckets(ctx, cfg); err != nil {
-			// Don't fail the launch if bucket creation fails, just log the error
-			p.logger.Error("failed to create buckets", zap.Error(err))
+			_ = p.Stop(context.Background())
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to create GCS buckets")
 		}
 	}
 
@@ -151,7 +160,7 @@ func (p *GCSPlugin) IsReady(ctx context.Context) (bool, error) {
 		p.logger.Debug("GCS not ready yet", zap.Error(err))
 		return false, nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return resp.StatusCode == http.StatusOK, nil
 }
@@ -180,6 +189,7 @@ func (p *GCSPlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found GCS container",
@@ -188,10 +198,13 @@ func (p *GCSPlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -213,6 +226,7 @@ func (p *GCSPlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("GCS service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -299,27 +313,11 @@ func (p *GCSPlugin) parseConfig(config map[string]interface{}) (*GCSConfig, erro
 		ContainerName: fmt.Sprintf("%s-%d", containerNamePrefix, time.Now().Unix()),
 	}
 
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
-	if port, ok := config["port"].(string); ok && port != "" {
-		cfg.Port = port
-	} else if port, ok := config["port"].(float64); ok {
-		cfg.Port = fmt.Sprintf("%.0f", port)
-	}
-	if projectID, ok := config["project-id"].(string); ok && projectID != "" {
-		cfg.ProjectID = projectID
-	}
-	if buckets, ok := config["buckets"].([]interface{}); ok {
-		for _, b := range buckets {
-			if name, ok := b.(string); ok && name != "" {
-				cfg.Buckets = append(cfg.Buckets, name)
-			}
-		}
-	}
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
+	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
+	cfg.ProjectID = svcconfig.String(config, "project-id", cfg.ProjectID)
+	cfg.Buckets = append(cfg.Buckets, svcconfig.Strings(config, "buckets")...)
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
 
 	return cfg, nil
 }
@@ -332,6 +330,9 @@ func (p *GCSPlugin) waitForReady(ctx context.Context) error {
 	for i := 0; i < maxRetries; i++ {
 		ready, err := p.IsReady(ctx)
 		if err != nil {
+			if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+				return err
+			}
 			p.logger.Debug("error checking readiness",
 				zap.Error(err),
 				zap.Int("attempt", i+1))
@@ -371,7 +372,7 @@ func (p *GCSPlugin) createBuckets(ctx context.Context, cfg *GCSConfig) error {
 				fmt.Sprintf("failed to create bucket: %s", bucket))
 		}
 		ok := resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusConflict
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if !ok {
 			return gtErrors.New(gtErrors.ErrServiceFailed,
@@ -405,6 +406,8 @@ func buildCmd(cfg *GCSConfig) []string {
 // mustParsePort parses port string to int, returns 0 on error
 func mustParsePort(port string) int {
 	var p int
-	fmt.Sscanf(port, "%d", &p)
+	if _, err := fmt.Sscanf(port, "%d", &p); err != nil {
+		return 0
+	}
 	return p
 }

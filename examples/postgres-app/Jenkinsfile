@@ -1,0 +1,44 @@
+// Component tests with gtool. The agent needs Docker and the gtool CLI; gtool
+// starts the mocks and the app image, runs the Karate features and tears
+// everything down, failing the stage when a scenario fails.
+pipeline {
+  agent any
+
+  options {
+    timeout(time: 20, unit: 'MINUTES')
+  }
+
+  environment {
+    APP_IMAGE          = "postgres-app:ci-${env.BUILD_NUMBER}"
+    GTOOL_DOCKER_IMAGE = "${APP_IMAGE}"
+    GTOOL_RUN_ID       = "${env.BUILD_TAG}"
+  }
+
+  stages {
+    stage('Build image') {
+      steps {
+        sh 'docker build -t "$APP_IMAGE" .'
+      }
+    }
+
+    stage('Component tests') {
+      steps {
+        sh 'gtool test --config component-config.yml'
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'docker rmi "$APP_IMAGE" || true'
+      publishHTML(target: [
+        reportName: 'Karate report',
+        reportDir: 'test/component/reports',
+        reportFiles: 'karate-summary.html',
+        allowMissing: true,
+        alwaysLinkToLastBuild: true,
+        keepAll: true,
+      ])
+    }
+  }
+}

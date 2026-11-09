@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="gtool logo">
+  <defs>
+    <linearGradient id="lbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1712"/>
+      <stop offset="1" stop-color="#12261e"/>
+    </linearGradient>
+    <linearGradient id="lgreen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10b981"/>
+      <stop offset="1" stop-color="#6ee7b7"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#lbg)"/>
+
+  <!-- mark: lab flask (isolated component under test) holding a passing check -->
+  <g transform="translate(256,268)">
+    <path d="M -90.6 40 L -138 118 Q -150 150 -114 150 L 114 150 Q 150 150 138 118 L 90.6 40 Z"
+          fill="#10b981" fill-opacity="0.28"/>
+    <path d="M -36 -150 L -36 -50 L -138 118 Q -150 150 -114 150 L 114 150 Q 150 150 138 118 L 36 -50 L 36 -150"
+          fill="none" stroke="url(#lgreen)" stroke-width="24" stroke-linejoin="round"/>
+    <path d="M -60 -150 L 60 -150" stroke="url(#lgreen)" stroke-width="24" stroke-linecap="round"/>
+    <circle cx="12" cy="-82" r="9" fill="#6ee7b7"/>
+    <circle cx="-10" cy="-114" r="6" fill="#6ee7b7" fill-opacity="0.7"/>
+    <path d="M -62 72 L -18 114 L 70 6"
+          fill="none" stroke="#e8f5ef" stroke-width="24"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

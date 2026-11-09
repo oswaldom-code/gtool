@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -60,14 +61,14 @@ func TestParseConfig(t *testing.T) {
 			wantPartitions: defaultPartitions,
 		},
 		{
-			name: "topics list ignores non-string and empty entries",
+			name: "topics list keeps numeric names and skips empty entries",
 			input: map[string]interface{}{
 				"topics": []interface{}{"orders", "", 42, "events"},
 			},
 			wantImage:      defaultImage,
 			wantPort:       defaultPort,
 			wantPartitions: defaultPartitions,
-			wantTopics:     []string{"orders", "events"},
+			wantTopics:     []string{"orders", "42", "events"},
 		},
 		{
 			name: "zero partitions falls back to default",
@@ -129,12 +130,24 @@ func TestGetConnectionInfo(t *testing.T) {
 
 func TestBrokerEnv(t *testing.T) {
 	p := NewKafkaPlugin(nil, nil)
-	env := p.brokerEnv(&KafkaConfig{Port: "19092"})
+	env := p.brokerEnv(&KafkaConfig{Port: "19092", DockerPort: "19094"})
 
-	// External listener must be advertised on the configured host port.
-	assert.Contains(t, env, "KAFKA_ADVERTISED_LISTENERS=INTERNAL://localhost:29092,EXTERNAL://localhost:19092")
+	// Both host-facing listeners must be advertised on their configured host ports.
+	assert.Contains(t, env, "KAFKA_ADVERTISED_LISTENERS=INTERNAL://localhost:29092,EXTERNAL://localhost:19092,DOCKER://host.docker.internal:19094")
 	assert.Contains(t, env, "KAFKA_PROCESS_ROLES=broker,controller")
 	assert.Contains(t, env, "KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL")
+}
+
+func TestParseConfig_DockerPort(t *testing.T) {
+	p := NewKafkaPlugin(nil, nil)
+
+	def, err := p.parseConfig(map[string]interface{}{})
+	assert.NoError(t, err)
+	assert.Equal(t, dockerListenerPort, def.DockerPort)
+
+	custom, err := p.parseConfig(map[string]interface{}{"docker-port": 19094})
+	assert.NoError(t, err)
+	assert.Equal(t, "19094", custom.DockerPort)
 }
 
 func TestBootstrapServers(t *testing.T) {
@@ -147,7 +160,7 @@ func TestBootstrapServers(t *testing.T) {
 func TestIsReady_NotStarted(t *testing.T) {
 	p := NewKafkaPlugin(nil, nil)
 
-	ready, err := p.IsReady(nil)
+	ready, err := p.IsReady(context.TODO())
 
 	assert.False(t, ready)
 	require.Error(t, err)
@@ -157,7 +170,7 @@ func TestIsReady_NotStarted(t *testing.T) {
 func TestStop_NoContainer(t *testing.T) {
 	p := NewKafkaPlugin(nil, zap.NewNop())
 
-	err := p.Stop(nil)
+	err := p.Stop(context.TODO())
 	assert.NoError(t, err)
 }
 

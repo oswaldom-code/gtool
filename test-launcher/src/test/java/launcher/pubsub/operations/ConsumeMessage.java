@@ -15,6 +15,7 @@ import com.google.pubsub.v1.PullResponse;
 import com.google.pubsub.v1.ReceivedMessage;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import launcher.pubsub.PubSub;
 import launcher.pubsub.Utils;
 import launcher.pubsub.PubSub.PubSubData;
 
@@ -33,6 +34,19 @@ import static org.awaitility.Awaitility.await;
 public class ConsumeMessage implements PubSubOperation {
 
     private static final Logger logger = LoggerFactory.getLogger(ConsumeMessage.class);
+    private static final long STOP_TIMEOUT_SECONDS = 10;
+
+    private static boolean matches(JsonNode expected, PubsubMessage message, PubSubData pubSubData) {
+        try {
+            JsonNode messageTree = Utils.mapperMessageToJsonNode(message.getData().toStringUtf8(), pubSubData);
+            return Utils.compareJsonNodes(expected, messageTree)
+                    && Utils.isValidOrdering(pubSubData, message)
+                    && Utils.containsAttributes(pubSubData, message);
+        } catch (RuntimeException e) {
+            logger.warn("skipping message that is not valid JSON: {}", e.getMessage());
+            return false;
+        }
+    }
 
     public String execute(PubSubData pubSubData) {
         if (Objects.nonNull(pubSubData.timeoutConsumeMessageSeconds)) {
@@ -50,19 +64,18 @@ public class ConsumeMessage implements PubSubOperation {
 
         JsonNode expectedMessageTree = Utils.mapperMessageToJsonNode(pubSubData.expectedMessage, pubSubData);
 
-        String hostPort = System.getenv("PUBSUB_EMULATOR_HOST");
-        ManagedChannel channel = ManagedChannelBuilder.forTarget(hostPort).usePlaintext().build();
+        ManagedChannel channel = ManagedChannelBuilder.forTarget(PubSub.emulatorHost()).usePlaintext().build();
         FixedTransportChannelProvider channelProvider = FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel));
 
+        // Every message that is not the expected one is nacked: holding its
+        // lease would hide it from the next consume on the same subscription.
         MessageReceiver receiver =
                 (PubsubMessage message, AckReplyConsumer consumer) -> {
-                    JsonNode messageTree = Utils.mapperMessageToJsonNode(message.getData().toStringUtf8(),
-                            pubSubData);
-                    if (Utils.compareJsonNodes(expectedMessageTree, messageTree) &&
-                        Utils.isValidOrdering(pubSubData, message) &&
-                        Utils.containsAttributes(pubSubData, message)) {
+                    if (!messageFound.get() && matches(expectedMessageTree, message, pubSubData)) {
                         consumer.ack();
                         messageFound.set(true);
+                    } else {
+                        consumer.nack();
                     }
                 };
 
@@ -79,8 +92,15 @@ public class ConsumeMessage implements PubSubOperation {
         } catch (Exception e) {
             logger.error("error consuming messages", e);
         } finally {
-            logger.info("finally consuming messages, stopping subscriber");
-            Objects.requireNonNull(subscriber).stopAsync();
+            logger.info("stopping subscriber");
+            if (subscriber != null) {
+                try {
+                    subscriber.stopAsync().awaitTerminated(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    logger.warn("subscriber did not stop cleanly", e);
+                }
+            }
+            channel.shutdownNow();
         }
 
         if (!messageFound.get()) {

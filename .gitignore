@@ -36,3 +36,9 @@ release/
 
 # Reports
 test/component/reports/
+examples/*/test/component/reports/
+test/stress/reports/
+examples/*/test/stress/reports/
+
+# Documentation site build output
+/web/site/

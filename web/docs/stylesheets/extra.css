@@ -1,0 +1,115 @@
+/* gtool theme — emerald from the logo (a passing test), coral for failures, system fonts. */
+
+:root {
+  --gt-accent: #047857;
+  --gt-accent-soft: rgba(4, 120, 87, 0.09);
+  --gt-fail: #c2410c;
+  --gt-fail-soft: rgba(194, 65, 12, 0.09);
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #047857;
+  --md-primary-fg-color--dark: #065f46;
+  --md-accent-fg-color: #10b981;
+  --md-typeset-a-color: #047857;
+  --md-default-bg-color: #f6faf8;
+}
+
+[data-md-color-scheme="slate"] {
+  --gt-accent: #34d399;
+  --gt-accent-soft: rgba(52, 211, 153, 0.1);
+  --gt-fail: #fb923c;
+  --gt-fail-soft: rgba(251, 146, 60, 0.12);
+  --md-primary-fg-color: #047857;
+  --md-accent-fg-color: #34d399;
+  --md-typeset-a-color: #34d399;
+  --md-default-bg-color: #0b1712;
+  --md-code-bg-color: #08110d;
+}
+
+/* Light header on both schemes, matching rhttp. */
+.md-header {
+  background-color: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  box-shadow: 0 0 0.05rem rgba(0, 0, 0, 0.25), 0 0.05rem 0.3rem rgba(0, 0, 0, 0.08);
+}
+
+.md-header__button,
+.md-header__title,
+.md-header__topic {
+  color: var(--md-default-fg-color);
+}
+
+.md-header .md-logo img {
+  border-radius: 0.3rem;
+}
+
+.md-search__input {
+  background-color: var(--md-default-fg-color--lightest);
+  color: var(--md-default-fg-color);
+}
+
+.md-search__input::placeholder,
+.md-search__input + .md-search__icon {
+  color: var(--md-default-fg-color--light);
+}
+
+/* Home hero banner. */
+.gt-banner {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 0.6rem;
+  margin: 0.4rem 0 1.4rem;
+}
+
+.gt-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Pipeline visual (home page and guides). */
+.gt-pipeline {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding: 0.4rem 0 0.7rem;
+}
+
+.gt-pipeline .step {
+  font-family: var(--md-code-font-family, monospace);
+  font-size: 0.68rem;
+  font-weight: 500;
+  padding: 0.32rem 0.6rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  white-space: nowrap;
+}
+
+.gt-pipeline .step.hot {
+  color: var(--gt-accent);
+  border-color: var(--gt-accent);
+  background: var(--gt-accent-soft);
+}
+
+.gt-pipeline .step.fail {
+  color: var(--gt-fail);
+  border-color: var(--gt-fail);
+  background: var(--gt-fail-soft);
+}
+
+.gt-pipeline .step.end {
+  background: var(--md-default-fg-color);
+  color: var(--md-default-bg-color);
+  border-color: var(--md-default-fg-color);
+}
+
+.gt-pipeline .arr {
+  color: var(--md-default-fg-color--light);
+  user-select: none;
+}

@@ -11,12 +11,16 @@ function fn() {
   };
   config.sleep = sleep;
 
+  var RunPorts = Java.type('launcher.util.RunPorts');
+  config.appUrl = RunPorts.appUrl();
+
   // PostgreSQL helper (assertions / seeding against a running Postgres on localhost)
   var PostgresClient = Java.type('launcher.postgres.PostgresClient');
   config.ps = new PostgresClient({
-    url: 'jdbc:postgresql://localhost:5432/postgres',
-    user: 'postgres',
-    password: 'postgres'
+    url: 'jdbc:postgresql://localhost:' + RunPorts.port('postgresql', '5432') + '/'
+      + RunPorts.setting('postgresql', 'database', 'postgres'),
+    user: RunPorts.setting('postgresql', 'user', 'postgres'),
+    password: RunPorts.setting('postgresql', 'password', 'postgres')
   });
 
   // Date helper

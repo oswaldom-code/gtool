@@ -2,6 +2,7 @@ package mock
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -41,6 +42,7 @@ type DockerClient interface {
 type serviceState struct {
 	plugin    plugin.ServicePlugin
 	startTime time.Time
+	starting  bool
 	stopped   bool
 	error     error
 }
@@ -60,85 +62,121 @@ func NewManager(registry *plugin.Registry, logger *zap.Logger, orchestration con
 	}
 }
 
-// Start starts a specific service
-func (m *Manager) Start(ctx context.Context, serviceName string, config map[string]interface{}) error {
+// reserve records serviceName as starting, so concurrent Starts of the same
+// service and StopAll see it. It returns nil when the service already runs.
+func (m *Manager) reserve(serviceName string) (plugin.ServicePlugin, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check if already running
 	if state, exists := m.services[serviceName]; exists && !state.stopped {
 		m.logger.Warn("service already running", zap.String("service", serviceName))
-		return nil
+		return nil, nil
 	}
 
-	// Get plugin from registry
 	servicePlugin, err := m.registry.GetService(serviceName)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed,
+		return nil, gtErrors.Wrap(err, gtErrors.ErrServiceFailed,
 			fmt.Sprintf("service %s not found in registry", serviceName))
 	}
 
-	m.logger.Info("starting service", zap.String("service", serviceName))
+	m.services[serviceName] = &serviceState{plugin: servicePlugin, startTime: time.Now(), starting: true}
+	return servicePlugin, nil
+}
 
-	// Launch the service
-	if err := servicePlugin.Launch(ctx, config); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed,
-			fmt.Sprintf("failed to launch service %s", serviceName))
+func (m *Manager) forget(serviceName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.services, serviceName)
+}
+
+func (m *Manager) markReady(serviceName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if state, ok := m.services[serviceName]; ok {
+		state.starting = false
+		state.startTime = time.Now()
 	}
+}
 
-	// Wait for service to be ready
-	m.logger.Info("waiting for service to be ready", zap.String("service", serviceName))
+func (m *Manager) markFailed(serviceName string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if state, ok := m.services[serviceName]; ok {
+		state.starting = false
+		state.error = err
+	}
+}
 
-	ready := false
+// waitReady polls the plugin until it is ready, the retries run out or ctx is
+// cancelled.
+func (m *Manager) waitReady(ctx context.Context, serviceName string, servicePlugin plugin.ServicePlugin) error {
 	for i := 0; i < m.orchestration.HealthCheckRetries; i++ {
 		isReady, err := servicePlugin.IsReady(ctx)
+		if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+			return err
+		}
 		if err != nil {
 			m.logger.Debug("health check failed",
 				zap.String("service", serviceName),
 				zap.Error(err),
 				zap.Int("attempt", i+1))
 		}
-
 		if isReady {
-			ready = true
-			break
+			return nil
 		}
 
 		select {
 		case <-ctx.Done():
-			return gtErrors.New(gtErrors.ErrServiceFailed, "context cancelled while waiting for service")
+			return gtErrors.Wrap(ctx.Err(), gtErrors.ErrServiceFailed, "context cancelled while waiting for service")
 		case <-time.After(m.orchestration.HealthCheckInterval):
-			// Continue to next attempt
 		}
 	}
+	return gtErrors.New(gtErrors.ErrServiceNotReady,
+		fmt.Sprintf("service %s did not become ready within timeout", serviceName))
+}
 
-	if !ready {
-		// Cleanup on failure if configured
-		if m.orchestration.CleanupOnFailure {
-			_ = servicePlugin.Stop(ctx)
+// Start launches a service and waits until it is ready. The manager lock is
+// held only to update its state, so services start concurrently. A service
+// that launched but did not become ready is stopped when the context was
+// cancelled or cleanup-on-failure is set; otherwise it stays recorded (state
+// "error") for inspection and a later StopAll.
+func (m *Manager) Start(ctx context.Context, serviceName string, config map[string]interface{}) error {
+	servicePlugin, err := m.reserve(serviceName)
+	if err != nil || servicePlugin == nil {
+		return err
+	}
+
+	m.logger.Info("starting service", zap.String("service", serviceName))
+	if err := servicePlugin.Launch(ctx, config); err != nil {
+		m.forget(serviceName)
+		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed,
+			fmt.Sprintf("failed to launch service %s", serviceName))
+	}
+
+	m.logger.Info("waiting for service to be ready", zap.String("service", serviceName))
+	if err := m.waitReady(ctx, serviceName, servicePlugin); err != nil {
+		if ctx.Err() != nil || m.orchestration.CleanupOnFailure {
+			if stopErr := servicePlugin.Stop(context.Background()); stopErr != nil {
+				m.logger.Warn("failed to stop service after a failed start",
+					zap.String("service", serviceName), zap.Error(stopErr))
+			}
+			m.forget(serviceName)
+		} else {
+			m.markFailed(serviceName, err)
 		}
-		return gtErrors.New(gtErrors.ErrServiceNotReady,
-			fmt.Sprintf("service %s did not become ready within timeout", serviceName))
+		return err
 	}
 
-	// Store service state
-	m.services[serviceName] = &serviceState{
-		plugin:    servicePlugin,
-		startTime: time.Now(),
-		stopped:   false,
-	}
-
+	m.markReady(serviceName)
 	m.logger.Info("service started successfully", zap.String("service", serviceName))
 	return nil
 }
 
 // Stop stops a specific service
 func (m *Manager) Stop(ctx context.Context, serviceName string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// First, check if service is in memory
+	m.mu.RLock()
 	state, exists := m.services[serviceName]
+	m.mu.RUnlock()
 
 	// If not in memory, try to find it in Docker and get plugin
 	if !exists {
@@ -185,13 +223,12 @@ func (m *Manager) Stop(ctx context.Context, serviceName string) error {
 	m.logger.Info("stopping service", zap.String("service", serviceName))
 
 	if err := state.plugin.Stop(ctx); err != nil {
-		state.error = err
+		m.markFailed(serviceName, err)
 		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed,
 			fmt.Sprintf("failed to stop service %s", serviceName))
 	}
 
-	state.stopped = true
-	delete(m.services, serviceName)
+	m.forget(serviceName)
 
 	m.logger.Info("service stopped", zap.String("service", serviceName))
 	return nil
@@ -206,15 +243,15 @@ func (m *Manager) StopAll(ctx context.Context) error {
 	}
 	m.mu.RUnlock()
 
-	var errors []error
+	var errs []error
 	for _, name := range serviceNames {
 		if err := m.Stop(ctx, name); err != nil {
-			errors = append(errors, err)
+			errs = append(errs, err)
 		}
 	}
 
-	if len(errors) > 0 {
-		return fmt.Errorf("failed to stop some services: %v", errors)
+	if len(errs) > 0 {
+		return gtErrors.Wrap(errors.Join(errs...), gtErrors.ErrServiceFailed, "failed to stop some services")
 	}
 
 	return nil
@@ -223,7 +260,11 @@ func (m *Manager) StopAll(ctx context.Context) error {
 // GetStatus returns the status of a specific service
 func (m *Manager) GetStatus(ctx context.Context, serviceName string) (*ServiceStatus, error) {
 	m.mu.RLock()
-	state, exists := m.services[serviceName]
+	var state serviceState
+	current, exists := m.services[serviceName]
+	if exists {
+		state = *current
+	}
 	m.mu.RUnlock()
 
 	// If not in memory, check Docker
@@ -275,6 +316,11 @@ func (m *Manager) GetStatus(ctx context.Context, serviceName string) (*ServiceSt
 
 	if state.stopped {
 		status.Status = "stopped"
+		return status, nil
+	}
+
+	if state.starting {
+		status.Status = "starting"
 		return status, nil
 	}
 
@@ -370,16 +416,14 @@ func (m *Manager) GetLogs(ctx context.Context, serviceName string, opts *plugin.
 
 // ListRunning returns a list of currently running services
 func (m *Manager) ListRunning() []string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	// Start with services in memory
 	servicesMap := make(map[string]bool)
+	m.mu.RLock()
 	for name, state := range m.services {
 		if !state.stopped {
 			servicesMap[name] = true
 		}
 	}
+	m.mu.RUnlock()
 
 	// Also check Docker for containers managed by gtool
 	if m.docker != nil {
@@ -424,7 +468,7 @@ func (m *Manager) startSequential(ctx context.Context, serviceConfigs map[string
 	for serviceName, config := range serviceConfigs {
 		if err := m.Start(ctx, serviceName, config); err != nil {
 			if m.orchestration.CleanupOnFailure {
-				_ = m.StopAll(ctx)
+				_ = m.StopAll(context.Background())
 			}
 			return err
 		}
@@ -442,7 +486,7 @@ func (m *Manager) startParallel(ctx context.Context, serviceConfigs map[string]m
 		go func(name string, cfg map[string]interface{}) {
 			defer wg.Done()
 			if err := m.Start(ctx, name, cfg); err != nil {
-				errChan <- fmt.Errorf("%s: %w", name, err)
+				errChan <- err
 			}
 		}(serviceName, config)
 	}
@@ -450,17 +494,16 @@ func (m *Manager) startParallel(ctx context.Context, serviceConfigs map[string]m
 	wg.Wait()
 	close(errChan)
 
-	// Check for errors
-	var errors []error
+	var errs []error
 	for err := range errChan {
-		errors = append(errors, err)
+		errs = append(errs, err)
 	}
 
-	if len(errors) > 0 {
+	if len(errs) > 0 {
 		if m.orchestration.CleanupOnFailure {
-			_ = m.StopAll(ctx)
+			_ = m.StopAll(context.Background())
 		}
-		return fmt.Errorf("failed to start services: %v", errors)
+		return gtErrors.Wrap(errors.Join(errs...), gtErrors.ErrServiceFailed, "failed to start services")
 	}
 
 	return nil

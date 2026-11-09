@@ -16,6 +16,8 @@ const (
 	ErrDockerConnection  = "ERR_DOCKER_CONNECTION"
 	ErrDockerFailed      = "ERR_DOCKER_FAILED"
 	ErrContainerFailed   = "ERR_CONTAINER_FAILED"
+	ErrContainerForeign  = "ERR_CONTAINER_FOREIGN"
+	ErrContainerExited   = "ERR_CONTAINER_EXITED"
 	ErrProcessFailed     = "ERR_PROCESS_FAILED"
 	ErrInvalidArgument   = "ERR_INVALID_ARGUMENT"
 )
@@ -66,10 +68,26 @@ func (e *GTError) WithContext(key string, value interface{}) *GTError {
 	return e
 }
 
-// Is checks if an error matches a code
+// Is reports whether any GTError in err's chain (including errors joined with
+// errors.Join or wrapped with fmt.Errorf %w) has the given code.
 func Is(err error, code string) bool {
-	if gtErr, ok := err.(*GTError); ok {
-		return gtErr.Code == code
+	switch e := err.(type) {
+	case nil:
+		return false
+	case *GTError:
+		if e == nil {
+			return false
+		}
+		return e.Code == code || Is(e.Cause, code)
+	case interface{ Unwrap() []error }:
+		for _, inner := range e.Unwrap() {
+			if Is(inner, code) {
+				return true
+			}
+		}
+		return false
+	case interface{ Unwrap() error }:
+		return Is(e.Unwrap(), code)
 	}
 	return false
 }

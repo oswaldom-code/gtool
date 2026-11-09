@@ -5,11 +5,12 @@ app-technology: golang
 app-config:
   docker-image: postgres-app:latest
   port: 8080
+  host-port: auto
   environment:
     # On Linux the app container reaches the host-published mock via the host
     # gateway; see README for networking notes.
     DB_HOST: host.docker.internal
-    DB_PORT: "5432"
+    DB_PORT: "${mocks.postgresql.port}"
     DB_USER: postgres
     DB_PASSWORD: postgres
     DB_NAME: postgres
@@ -17,8 +18,8 @@ app-config:
 # Backend API tests (Karate).
 test-launcher: test-launcher-back
 test-config:
-  features-path: ./features
-  reports-path: ./reports
+  features-path: ./test/component/features
+  reports-path: ./test/component/reports
   tags: smoke
 
 # Mock dependencies started by gtool.
@@ -27,8 +28,8 @@ third-party:
     - postgresql
   mock-config:
     postgresql:
-      port: "5432"
+      port: auto
       user: postgres
       password: postgres
       database: postgres
-      scripts-path: ./init
+      scripts-path: ./test/component/mocks-data/postgresql

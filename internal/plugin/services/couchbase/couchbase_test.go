@@ -1,6 +1,7 @@
 package couchbase
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -46,7 +47,7 @@ func TestParseConfig(t *testing.T) {
 			in: map[string]interface{}{
 				"image":          "couchbase:community-7.2.0",
 				"admin-port":     "18091",
-				"data-port":      "21210",
+				"data-port":      "11210",
 				"username":       "admin",
 				"password":       "secret",
 				"bucket":         "orders",
@@ -57,7 +58,7 @@ func TestParseConfig(t *testing.T) {
 			want: &CouchbaseConfig{
 				Image:        "couchbase:community-7.2.0",
 				AdminPort:    "18091",
-				DataPort:     "21210",
+				DataPort:     "11210",
 				Username:     "admin",
 				Password:     "secret",
 				Bucket:       "orders",
@@ -147,7 +148,7 @@ func TestGetConnectionInfo(t *testing.T) {
 		assert.Equal(t, "localhost", got.Host)
 		assert.Equal(t, 8091, got.Port)
 		assert.Equal(t, "couchbase", got.Protocol)
-		assert.Equal(t, "Administrator", got.Metadata["username"])
+		assert.Equal(t, "Administrator", got.Metadata["user"])
 		assert.Equal(t, "password", got.Metadata["password"])
 		assert.Equal(t, "default", got.Metadata["bucket"])
 		assert.Equal(t, "couchbase://localhost", got.Metadata["connection-string"])
@@ -166,7 +167,7 @@ func TestGetConnectionInfo(t *testing.T) {
 func TestIsReady_NotStarted(t *testing.T) {
 	p := NewCouchbasePlugin(nil, nil)
 
-	ready, err := p.IsReady(nil)
+	ready, err := p.IsReady(context.TODO())
 
 	assert.False(t, ready)
 	require.Error(t, err)
@@ -176,21 +177,8 @@ func TestIsReady_NotStarted(t *testing.T) {
 func TestStop_NoContainer(t *testing.T) {
 	p := NewCouchbasePlugin(nil, zap.NewNop())
 
-	err := p.Stop(nil)
+	err := p.Stop(context.TODO())
 	assert.NoError(t, err)
-}
-
-func TestStringOrFloat(t *testing.T) {
-	cfg := map[string]interface{}{
-		"s": "value",
-		"f": float64(8091),
-		"e": "",
-	}
-
-	assert.Equal(t, "value", stringOrFloat(cfg, "s", "fallback"))
-	assert.Equal(t, "8091", stringOrFloat(cfg, "f", "fallback"))
-	assert.Equal(t, "fallback", stringOrFloat(cfg, "e", "fallback"))
-	assert.Equal(t, "fallback", stringOrFloat(cfg, "missing", "fallback"))
 }
 
 func TestIntOrFloat(t *testing.T) {
@@ -209,4 +197,27 @@ func TestIntOrFloat(t *testing.T) {
 func TestMustParsePort(t *testing.T) {
 	assert.Equal(t, 8091, mustParsePort("8091"))
 	assert.Equal(t, 0, mustParsePort("0"))
+}
+
+func TestParseConfig_UserAlias(t *testing.T) {
+	p := NewCouchbasePlugin(nil, nil)
+
+	canonical, err := p.parseConfig(map[string]interface{}{"user": "admin"})
+	require.NoError(t, err)
+	assert.Equal(t, "admin", canonical.Username)
+
+	legacy, err := p.parseConfig(map[string]interface{}{"username": "legacy"})
+	require.NoError(t, err)
+	assert.Equal(t, "legacy", legacy.Username, "username stays accepted as an alias")
+}
+
+func TestParseConfig_DataPortCannotBeRemapped(t *testing.T) {
+	p := NewCouchbasePlugin(nil, nil)
+
+	_, err := p.parseConfig(map[string]interface{}{"data-port": "21210"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "data-port must be 11210")
+
+	_, err = p.parseConfig(map[string]interface{}{"data-port": 11210, "admin-port": "18091"})
+	assert.NoError(t, err, "the admin port can still move")
 }

@@ -20,7 +20,7 @@ Configuration is read from environment variables: `DB_HOST`, `DB_PORT`,
 # Start PostgreSQL with the seed schema
 docker run -d --name pg -p 5432:5432 \
   -e POSTGRES_PASSWORD=postgres \
-  -v "$PWD/init":/docker-entrypoint-initdb.d \
+  -v "$PWD/test/component/mocks-data/postgresql":/docker-entrypoint-initdb.d \
   postgres:16-alpine
 
 # Run the app against it
@@ -41,18 +41,37 @@ docker build -t postgres-app:latest .
 gtool test --config component-config.yml
 ```
 
-`gtool test` starts the PostgreSQL mock (seeded from `init/`), starts this app,
-runs the Karate features in `features/`, and tears everything down.
+`gtool test` starts the PostgreSQL mock (seeded from
+`test/component/mocks-data/postgresql/`), starts this app, runs the Karate
+features in `test/component/features/`, and tears everything down.
+
+## Stress test it with gtool
+
+`api/openapi.yml` describes the endpoints, and `configs/stress-example.yml` at the
+repository root ramps the load over the GET operations (`/users` from the
+contract, `/health` as an explicit target):
+
+```bash
+# From the repository root, after building the image
+gtool stress plan --config configs/stress-example.yml   # resolved targets, no load
+gtool stress --config configs/stress-example.yml        # mocks → app → ramp → reports → cleanup
+```
+
+The JSON and HTML reports are written to `test/stress/reports/` in this
+directory (git-ignored). The run fails when the sustained load is below
+`min-acceptable-rps`.
 
 ## Networking notes
 
+- **Ports:** `component-config.yml` uses `port: auto` and `host-port: auto`, so
+  each `gtool test` run publishes the mock and the app on free host ports and
+  several runs can share one host. The app receives the mock port through
+  `${mocks.postgresql.port}`.
 - **App → mock:** gtool runs the app as a bridge-network container while the
-  mock publishes `5432` on the host. The app therefore reaches the mock through
-  the host gateway. On Docker Desktop `host.docker.internal` resolves
-  automatically; on Linux you currently need `host.docker.internal` mapped to
-  the host gateway (or run the mock and app on the same Docker network). This is
-  a known gtool limitation tracked for a future enhancement.
-- **Tests → app:** the Karate launcher runs on the host network, so it reaches
-  the app at `localhost:8080`.
+  mock publishes its port on the host. The app therefore reaches the mock
+  through the host gateway: gtool maps `host.docker.internal` to it on the app
+  container, on Linux and Docker Desktop alike.
+- **Tests → app:** the Karate launcher runs on the host network and reaches the
+  app through `appUrl` (`http://localhost:<app host port>`).
 - **Local image:** `postgres-app:latest` only exists locally after
-  `docker build`; ensure it is built before running `gtool test`.
+  `docker build`; gtool uses the local image and only pulls when it is missing.

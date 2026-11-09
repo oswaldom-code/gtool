@@ -1,6 +1,8 @@
 package mysql
 
 import (
+	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -205,7 +207,9 @@ func TestGetConnectionInfo(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, got)
 			assert.Equal(t, "localhost", got.Host)
-			assert.Equal(t, mustParsePort(tt.config.Port), got.Port)
+			wantPort, err := strconv.Atoi(tt.config.Port)
+			require.NoError(t, err)
+			assert.Equal(t, wantPort, got.Port)
 			assert.Equal(t, "mysql", got.Protocol)
 			assert.Equal(t, tt.wantUser, got.Metadata["user"])
 			assert.Equal(t, tt.wantPassword, got.Metadata["password"])
@@ -249,7 +253,7 @@ func TestIsReady_NotStarted(t *testing.T) {
 	plugin := NewMySQLPlugin(nil, nil)
 
 	// Should return error when container not started
-	ready, err := plugin.IsReady(nil)
+	ready, err := plugin.IsReady(context.TODO())
 	assert.False(t, ready)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not started")
@@ -259,6 +263,22 @@ func TestStop_NoContainer(t *testing.T) {
 	plugin := NewMySQLPlugin(nil, zap.NewNop())
 
 	// Should not error when no container to stop
-	err := plugin.Stop(nil)
+	err := plugin.Stop(context.TODO())
 	assert.NoError(t, err)
+}
+
+func TestParseConfig_RejectsUnusableUsers(t *testing.T) {
+	p := NewMySQLPlugin(nil, nil)
+
+	_, err := p.parseConfig(map[string]interface{}{"user": "root", "password": "x"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "root-password")
+
+	_, err = p.parseConfig(map[string]interface{}{"user": "app"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires a password")
+
+	cfg, err := p.parseConfig(map[string]interface{}{"user": "app", "password": "secret"})
+	require.NoError(t, err)
+	assert.Equal(t, "app", cfg.User)
 }

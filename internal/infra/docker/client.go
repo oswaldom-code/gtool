@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"fmt"
@@ -23,8 +24,10 @@ import (
 )
 
 type Client struct {
-	cli    *client.Client
-	logger *zap.Logger
+	cli     *client.Client
+	logger  *zap.Logger
+	runID   string
+	allRuns bool
 }
 
 type ContainerConfig struct {
@@ -36,6 +39,7 @@ type ContainerConfig struct {
 	PortBindings map[string]string
 	Mounts       []Mount
 	NetworkMode  string
+	ExtraHosts   []string
 	AutoRemove   bool
 	Init         bool
 	User         string
@@ -73,6 +77,18 @@ func NewClient(logger *zap.Logger) (*Client, error) {
 	}, nil
 }
 
+func (c *Client) SetRunID(id string) {
+	c.runID = sanitizeRunID(id)
+}
+
+func (c *Client) RunID() string {
+	return c.runID
+}
+
+func (c *Client) SetAllRuns(all bool) {
+	c.allRuns = all
+}
+
 func (c *Client) Close() error {
 	return c.cli.Close()
 }
@@ -84,7 +100,7 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, fmt.Sprintf("failed to pull image %s", imageName))
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	_, err = io.Copy(io.Discard, reader)
 	if err != nil {
@@ -97,7 +113,7 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 
 // ImageExists reports whether an image is already present in the local Docker
 // image store, so callers can avoid a registry pull for local-only images
-// (e.g. private STABLE images or freshly built ones).
+// (e.g. freshly built ones).
 func (c *Client) ImageExists(ctx context.Context, imageName string) (bool, error) {
 	_, _, err := c.cli.ImageInspectWithRaw(ctx, imageName)
 	if err != nil {
@@ -125,9 +141,10 @@ func (c *Client) EnsureImage(ctx context.Context, imageName string) error {
 }
 
 func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (string, error) {
+	name := withRunSuffix(config.Name, c.runID)
 	c.logger.Info("creating container",
 		zap.String("image", config.Image),
-		zap.String("name", config.Name))
+		zap.String("name", name))
 
 	// Build port bindings
 	portBindings := nat.PortMap{}
@@ -165,12 +182,13 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 		Env:          config.Env,
 		ExposedPorts: exposedPorts,
 		User:         config.User,
-		Labels:       config.Labels,
+		Labels:       withRunLabel(config.Labels, c.runID),
 	}
 
 	hostConfig := &container.HostConfig{
 		PortBindings: portBindings,
 		Mounts:       mounts,
+		ExtraHosts:   config.ExtraHosts,
 		AutoRemove:   config.AutoRemove,
 	}
 
@@ -189,7 +207,7 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 		hostConfig,
 		&network.NetworkingConfig{},
 		nil,
-		config.Name,
+		name,
 	)
 	if err != nil {
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create container")
@@ -197,9 +215,27 @@ func (c *Client) CreateContainer(ctx context.Context, config *ContainerConfig) (
 
 	c.logger.Info("container created",
 		zap.String("containerID", resp.ID),
-		zap.String("name", config.Name))
+		zap.String("name", name))
 
 	return resp.ID, nil
+}
+
+// RunContainer creates and starts a container. When the start fails (e.g. the
+// host port is already allocated) the created container is removed, so a
+// failed launch never leaves an orphan behind.
+func (c *Client) RunContainer(ctx context.Context, config *ContainerConfig) (string, error) {
+	containerID, err := c.CreateContainer(ctx, config)
+	if err != nil {
+		return "", err
+	}
+	if err := c.StartContainer(ctx, containerID); err != nil {
+		if rmErr := c.RemoveContainer(context.Background(), containerID, true); rmErr != nil {
+			c.logger.Warn("failed to remove container after a failed start",
+				zap.String("containerID", containerID), zap.Error(rmErr))
+		}
+		return "", err
+	}
+	return containerID, nil
 }
 
 func (c *Client) StartContainer(ctx context.Context, containerID string) error {
@@ -248,10 +284,12 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 	return nil
 }
 
-// RemoveContainerByName force-removes any container with the given exact name
-// (in any state). It is a no-op when no such container exists, mirroring the
-// legacy "remove_container_if_exists" behaviour. Returns true if one was removed.
-func (c *Client) RemoveContainerByName(ctx context.Context, name string) (bool, error) {
+// RemoveContainerByName force-removes the container with exactly this name, in
+// any state, when it carries every label in labels; it is a no-op when none
+// exists. A same-named container without those labels was not created by
+// gtool: it is left alone and ErrContainerForeign is returned.
+func (c *Client) RemoveContainerByName(ctx context.Context, name string, labels map[string]string) (bool, error) {
+	name = withRunSuffix(name, c.runID)
 	args := filters.NewArgs()
 	args.Add("name", name)
 
@@ -273,6 +311,10 @@ func (c *Client) RemoveContainerByName(ctx context.Context, name string) (bool, 
 		if !matched {
 			continue
 		}
+		if !hasLabels(ct.Labels, labels) {
+			return removed, gtErrors.New(gtErrors.ErrContainerForeign, fmt.Sprintf(
+				"container %q exists but was not created by gtool; remove or rename it", name))
+		}
 		if err := c.RemoveContainer(ctx, ct.ID, true); err != nil {
 			return removed, err
 		}
@@ -280,6 +322,27 @@ func (c *Client) RemoveContainerByName(ctx context.Context, name string) (bool, 
 	}
 
 	return removed, nil
+}
+
+// FollowContainerLogs streams the container's logs (starting with the last tail
+// lines) to w until the container stops or ctx is cancelled; a cancellation
+// (Ctrl-C) is a normal end, not an error.
+func (c *Client) FollowContainerLogs(ctx context.Context, containerID string, tail int, w io.Writer) error {
+	reader, err := c.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+		Tail:       fmt.Sprintf("%d", tail),
+	})
+	if err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to follow container logs")
+	}
+	defer func() { _ = reader.Close() }()
+
+	if _, err := stdcopy.StdCopy(w, w, reader); err != nil && ctx.Err() == nil {
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to read container logs")
+	}
+	return nil
 }
 
 func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail int) (string, error) {
@@ -293,7 +356,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail 
 	if err != nil {
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get container logs")
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Docker logs come with 8-byte headers, use stdcopy to demultiplex
 	var stdout, stderr bytes.Buffer
@@ -318,7 +381,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail 
 		if err2 != nil {
 			return "", gtErrors.Wrap(err2, gtErrors.ErrDockerFailed, "failed to get container logs (retry)")
 		}
-		defer reader2.Close()
+		defer func() { _ = reader2.Close() }()
 
 		logs, err3 := io.ReadAll(reader2)
 		if err3 != nil {
@@ -337,7 +400,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, tail 
 func (c *Client) ListContainersByLabels(ctx context.Context, labels map[string]string) ([]types.Container, error) {
 	// Build filter string
 	filters := filters.NewArgs()
-	for key, value := range labels {
+	for key, value := range withRunLabel(labels, c.runID) {
 		filters.Add("label", fmt.Sprintf("%s=%s", key, value))
 	}
 
@@ -351,6 +414,15 @@ func (c *Client) ListContainersByLabels(ctx context.Context, labels map[string]s
 		return nil, gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to list containers")
 	}
 
+	if c.runID == "" && !c.allRuns {
+		var skipped int
+		containers, skipped = withoutScopedRuns(containers)
+		if skipped > 0 {
+			c.logger.Info("ignoring containers of other gtool runs; set GTOOL_RUN_ID to target one or pass --all-runs",
+				zap.Int("count", skipped))
+		}
+	}
+
 	c.logger.Debug("found containers", zap.Int("count", len(containers)))
 	return containers, nil
 }
@@ -360,7 +432,7 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, config
 		zap.String("containerID", containerID),
 		zap.Strings("cmd", config.Cmd))
 
-	execConfig := types.ExecConfig{
+	execConfig := container.ExecOptions{
 		AttachStdout: config.AttachStdout,
 		AttachStderr: config.AttachStderr,
 		Cmd:          config.Cmd,
@@ -373,16 +445,19 @@ func (c *Client) ExecInContainer(ctx context.Context, containerID string, config
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create exec instance")
 	}
 
-	resp, err := c.cli.ContainerExecAttach(ctx, execID.ID, types.ExecStartCheck{})
+	resp, err := c.cli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
 	if err != nil {
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to attach to exec instance")
 	}
 	defer resp.Close()
 
-	output, err := io.ReadAll(resp.Reader)
-	if err != nil {
+	// Without a TTY the exec stream is multiplexed: demux it so callers get the
+	// plain text instead of Docker's 8-byte frame headers.
+	var buf bytes.Buffer
+	if _, err := stdcopy.StdCopy(&buf, &buf, resp.Reader); err != nil {
 		return "", gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to read exec output")
 	}
+	output := buf.Bytes()
 
 	// Check exec exit code
 	inspectResp, err := c.cli.ContainerExecInspect(ctx, execID.ID)
@@ -427,12 +502,15 @@ func (c *Client) InspectContainer(ctx context.Context, containerID string) (*typ
 	return &inspect, nil
 }
 
+// IsContainerRunning reports whether the container runs. A container that has
+// already exited is an ErrContainerExited error, so readiness loops fail fast
+// instead of polling a dead container until their budget runs out.
 func (c *Client) IsContainerRunning(ctx context.Context, containerID string) (bool, error) {
 	inspect, err := c.InspectContainer(ctx, containerID)
 	if err != nil {
 		return false, err
 	}
-	return inspect.State.Running, nil
+	return runningState(inspect.State)
 }
 
 func (c *Client) Ping(ctx context.Context) error {
@@ -443,12 +521,38 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
+// singleFileTar packs one file into an in-memory tar archive, the format the
+// Docker copy API expects.
+func singleFileTar(name string, data []byte) (*bytes.Buffer, error) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {
+		return nil, err
+	}
+	if _, err := tw.Write(data); err != nil {
+		return nil, err
+	}
+	if err := tw.Close(); err != nil {
+		return nil, err
+	}
+	return &buf, nil
+}
+
+// CopyFileToContainer writes data as dir/name inside the container; dir must exist.
+func (c *Client) CopyFileToContainer(ctx context.Context, containerID, dir, name string, data []byte) error {
+	archive, err := singleFileTar(name, data)
+	if err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pack file for the container")
+	}
+	return c.CopyToContainer(ctx, containerID, dir, archive)
+}
+
 func (c *Client) CopyToContainer(ctx context.Context, containerID, targetPath string, content io.Reader) error {
 	c.logger.Info("copying to container",
 		zap.String("containerID", containerID),
 		zap.String("targetPath", targetPath))
 
-	err := c.cli.CopyToContainer(ctx, containerID, targetPath, content, types.CopyToContainerOptions{})
+	err := c.cli.CopyToContainer(ctx, containerID, targetPath, content, container.CopyToContainerOptions{})
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to copy to container")
 	}

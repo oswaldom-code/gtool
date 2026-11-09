@@ -14,7 +14,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const appContainerPrefix = "gtool-app"
+const (
+	appContainerPrefix = "gtool-app"
+	hostGatewayAlias   = "host.docker.internal:host-gateway"
+)
 
 // appLabels identify the application container managed by gtool. They are
 // distinct from the mock service labels so the two never collide.
@@ -27,7 +30,7 @@ func appLabels() map[string]string {
 
 // DockerClient is the subset of *docker.Client used by the DockerManager.
 type DockerClient interface {
-	PullImage(ctx context.Context, image string) error
+	EnsureImage(ctx context.Context, image string) error
 	CreateContainer(ctx context.Context, config *docker.ContainerConfig) (string, error)
 	StartContainer(ctx context.Context, containerID string) error
 	StopContainer(ctx context.Context, containerID string, timeout *int) error
@@ -67,30 +70,40 @@ func (m *DockerManager) Start(ctx context.Context, cfg *plugin.AppConfig) error 
 		return gtErrors.New(gtErrors.ErrInvalidArgument, "docker-image is required to start the application")
 	}
 
-	running, err := m.docker.ListContainersByLabels(ctx, appLabels())
+	existing, err := m.docker.ListContainersByLabels(ctx, appLabels())
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to check for running application")
 	}
-	if len(running) > 0 {
-		return gtErrors.New(gtErrors.ErrServiceFailed, "application is already running")
+	for _, c := range existing {
+		if c.State == "running" {
+			return gtErrors.New(gtErrors.ErrServiceFailed, "application is already running")
+		}
+	}
+	for _, c := range existing {
+		m.logger.Info("removing exited application container", zap.String("containerID", c.ID), zap.String("state", c.State))
+		if err := m.docker.RemoveContainer(ctx, c.ID, true); err != nil {
+			return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to remove exited application container")
+		}
 	}
 
-	m.logger.Info("pulling application image", zap.String("image", cfg.DockerImage))
-	if err := m.docker.PullImage(ctx, cfg.DockerImage); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull application image")
+	m.logger.Info("ensuring application image", zap.String("image", cfg.DockerImage))
+	if err := m.docker.EnsureImage(ctx, cfg.DockerImage); err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get application image")
 	}
 
 	containerConfig := &docker.ContainerConfig{
 		Image:        cfg.DockerImage,
 		Name:         fmt.Sprintf("%s-%d", appContainerPrefix, time.Now().Unix()),
 		Env:          envSlice(cfg.Environment),
-		PortBindings: portBindings(cfg.Port),
+		PortBindings: portBindings(cfg.Port, cfg.HostPort),
+		ExtraHosts:   []string{hostGatewayAlias},
 		Labels:       appLabels(),
 	}
 
 	m.logger.Info("creating application container",
 		zap.String("image", cfg.DockerImage),
-		zap.Int("port", cfg.Port))
+		zap.Int("port", cfg.Port),
+		zap.Int("host-port", cfg.HostPort))
 
 	containerID, err := m.docker.CreateContainer(ctx, containerConfig)
 	if err != nil {
@@ -98,6 +111,9 @@ func (m *DockerManager) Start(ctx context.Context, cfg *plugin.AppConfig) error 
 	}
 
 	if err := m.docker.StartContainer(ctx, containerID); err != nil {
+		if rmErr := m.docker.RemoveContainer(context.Background(), containerID, true); rmErr != nil {
+			m.logger.Warn("failed to remove application container", zap.String("containerID", containerID), zap.Error(rmErr))
+		}
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start application container")
 	}
 
@@ -192,11 +208,14 @@ func envSlice(env map[string]string) []string {
 	return out
 }
 
-// portBindings maps the application port to the same host port, if set.
-func portBindings(port int) map[string]string {
+// portBindings publishes the application port on hostPort, or on the same
+// port when hostPort is not set.
+func portBindings(port, hostPort int) map[string]string {
 	if port <= 0 {
 		return nil
 	}
-	p := strconv.Itoa(port)
-	return map[string]string{p: p}
+	if hostPort <= 0 {
+		hostPort = port
+	}
+	return map[string]string{strconv.Itoa(port): strconv.Itoa(hostPort)}
 }

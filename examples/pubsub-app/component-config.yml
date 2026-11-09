@@ -1,0 +1,36 @@
+version: v1
+
+# The application under test: built from the Dockerfile in this directory.
+app-technology: golang
+app-config:
+  docker-image: pubsub-app:latest
+  port: 8080
+  host-port: auto
+  environment:
+    # The app container reaches the host-published emulator through the host
+    # gateway that gtool maps to host.docker.internal.
+    PUBSUB_EMULATOR_HOST: host.docker.internal:${mocks.pubsub.port}
+    PUBSUB_PROJECT_ID: test-project
+    TOPIC: orders
+
+# Backend API tests (Karate).
+test-launcher: test-launcher-back
+test-config:
+  features-path: ./test/component/features
+  reports-path: ./test/component/reports
+  tags: smoke
+
+# Mock dependencies started by gtool.
+third-party:
+  mocks:
+    - pubsub
+  mock-config:
+    pubsub:
+      port: auto
+      project-id: test-project
+      topics:
+        - orders
+      subscriptions:
+        # Read by the tests to assert what the app published.
+        - name: orders-sub
+          topic: orders

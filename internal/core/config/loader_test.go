@@ -54,7 +54,7 @@ var _ = Describe("Loader", func() {
 
 	AfterEach(func() {
 		if tempDir != "" {
-			os.RemoveAll(tempDir)
+			Expect(os.RemoveAll(tempDir)).To(Succeed())
 		}
 	})
 
@@ -101,7 +101,6 @@ var _ = Describe("Loader", func() {
 				Expect(cfg.TestConfig.Tags).To(Equal("@smoke"))
 				Expect(cfg.TestConfig.FeaturesPath).To(Equal("./features"))
 				Expect(cfg.TestConfig.ReportsPath).To(Equal("./reports"))
-				Expect(cfg.TestConfig.Parallel).To(BeTrue())
 				Expect(cfg.ThirdParty.Mocks).To(HaveLen(2))
 				Expect(cfg.ThirdParty.Mocks).To(ContainElements("couchbase", "postgresql"))
 				Expect(cfg.Orchestration.ParallelMocks).To(BeFalse())
@@ -109,11 +108,7 @@ var _ = Describe("Loader", func() {
 				Expect(cfg.Orchestration.HealthCheckInterval).To(Equal(5 * time.Second))
 				Expect(cfg.Orchestration.HealthCheckRetries).To(Equal(30))
 				Expect(cfg.Orchestration.CleanupOnFailure).To(BeFalse())
-				Expect(cfg.Orchestration.PreserveLogs).To(BeFalse())
-				Expect(cfg.Observability.StructuredLogs).To(BeTrue())
 				Expect(cfg.Observability.LogLevel).To(Equal("debug"))
-				Expect(cfg.Observability.MetricsEnabled).To(BeFalse())
-				Expect(cfg.Observability.ReportFormat).To(Equal("json"))
 			})
 
 			It("should apply default values for missing fields", func() {
@@ -125,11 +120,7 @@ var _ = Describe("Loader", func() {
 				Expect(cfg.Orchestration.HealthCheckInterval).To(Equal(3 * time.Second))
 				Expect(cfg.Orchestration.HealthCheckRetries).To(Equal(60))
 				Expect(cfg.Orchestration.CleanupOnFailure).To(BeTrue())
-				Expect(cfg.Orchestration.PreserveLogs).To(BeTrue())
-				Expect(cfg.Observability.StructuredLogs).To(BeFalse())
 				Expect(cfg.Observability.LogLevel).To(Equal("info"))
-				Expect(cfg.Observability.MetricsEnabled).To(BeTrue())
-				Expect(cfg.Observability.ReportFormat).To(Equal("text"))
 			})
 
 			It("should handle empty file with defaults", func() {
@@ -174,7 +165,7 @@ var _ = Describe("Loader", func() {
 
 				err = os.Chmod(tempDir, 0000)
 				Expect(err).NotTo(HaveOccurred())
-				defer os.Chmod(tempDir, 0755)
+				defer func() { Expect(os.Chmod(tempDir, 0755)).To(Succeed()) }()
 
 				_, err = loader.Load(unreadableFile)
 				Expect(err).To(HaveOccurred())
@@ -194,7 +185,7 @@ var _ = Describe("Loader", func() {
 		})
 
 		AfterEach(func() {
-			os.Chdir(originalDir)
+			Expect(os.Chdir(originalDir)).To(Succeed())
 		})
 
 		DescribeTable("should load config from standard paths",
@@ -204,7 +195,7 @@ var _ = Describe("Loader", func() {
 
 				err = os.WriteFile(filename, content, 0644)
 				Expect(err).NotTo(HaveOccurred())
-				defer os.Remove(filename)
+				defer func() { Expect(os.Remove(filename)).To(Succeed()) }()
 
 				cfg, err := loader.LoadFromPath()
 
@@ -270,7 +261,7 @@ var _ = Describe("Loader", func() {
 		})
 
 		AfterEach(func() {
-			os.Chdir(originalDir)
+			Expect(os.Chdir(originalDir)).To(Succeed())
 		})
 
 		It("should return loaded config when file exists", func() {
@@ -297,20 +288,20 @@ var _ = Describe("Loader", func() {
 
 	Describe("Environment Variable Expansion", func() {
 		AfterEach(func() {
-			os.Unsetenv("APP_NAME")
-			os.Unsetenv("DB_HOST")
-			os.Unsetenv("DB_PORT")
-			os.Unsetenv("TEST_VAR")
-			os.Unsetenv("MY_VAR_NAME")
-			os.Unsetenv("VAR123")
-			os.Unsetenv("EMPTY_VAR")
+			Expect(os.Unsetenv("APP_NAME")).To(Succeed())
+			Expect(os.Unsetenv("DB_HOST")).To(Succeed())
+			Expect(os.Unsetenv("DB_PORT")).To(Succeed())
+			Expect(os.Unsetenv("TEST_VAR")).To(Succeed())
+			Expect(os.Unsetenv("MY_VAR_NAME")).To(Succeed())
+			Expect(os.Unsetenv("VAR123")).To(Succeed())
+			Expect(os.Unsetenv("EMPTY_VAR")).To(Succeed())
 		})
 
 		Context("with fixture file containing env vars", func() {
 			It("should expand ${VAR} syntax", func() {
-				os.Setenv("APP_NAME", "expanded-app")
-				os.Setenv("DB_HOST", "localhost")
-				os.Setenv("DB_PORT", "5432")
+				Expect(os.Setenv("APP_NAME", "expanded-app")).To(Succeed())
+				Expect(os.Setenv("DB_HOST", "localhost")).To(Succeed())
+				Expect(os.Setenv("DB_PORT", "5432")).To(Succeed())
 
 				cfg, err := loader.Load(withEnvVarsPath)
 
@@ -329,7 +320,7 @@ var _ = Describe("Loader", func() {
 
 		Context("when expansion is disabled", func() {
 			It("should not expand variables", func() {
-				os.Setenv("APP_NAME", "expanded-value")
+				Expect(os.Setenv("APP_NAME", "expanded-value")).To(Succeed())
 
 				loader.SetExpandEnv(false)
 				cfg, err := loader.Load(withEnvVarsPath)
@@ -343,7 +334,7 @@ var _ = Describe("Loader", func() {
 			DescribeTable("edge cases",
 				func(envVars map[string]string, binaryName, expected string) {
 					for k, v := range envVars {
-						os.Setenv(k, v)
+						Expect(os.Setenv(k, v)).To(Succeed())
 					}
 
 					content := "version: v1\napp-technology: golang\napp-config:\n  binary-name: " + binaryName + "\n  port: 8080\ntest-launcher: test-launcher-back\n"
@@ -362,9 +353,18 @@ var _ = Describe("Loader", func() {
 				Entry("numbers in var name",
 					map[string]string{"VAR123": "num-value"},
 					"${VAR123}", "num-value"),
-				Entry("empty env var keeps original",
+				Entry("set but empty env var expands to empty",
 					map[string]string{"EMPTY_VAR": ""},
-					"${EMPTY_VAR}", "${EMPTY_VAR}"),
+					"pre${EMPTY_VAR}post", "prepost"),
+				Entry("$$ is a literal dollar",
+					map[string]string{"word": "oops"},
+					"pa$$word", "pa$word"),
+				Entry("gtool placeholders are left for ports.Interpolate",
+					map[string]string{},
+					"${mocks.postgresql.port}", "${mocks.postgresql.port}"),
+				Entry("a value cannot inject YAML structure",
+					map[string]string{"INJECT": "x\n  port: 1"},
+					"'${INJECT}'", "x\n  port: 1"),
 				Entry("plain text without variables",
 					map[string]string{},
 					"plain-text", "plain-text"),
@@ -372,15 +372,45 @@ var _ = Describe("Loader", func() {
 		})
 	})
 
+	Describe("Typed values from environment variables", func() {
+		AfterEach(func() {
+			Expect(os.Unsetenv("APP_PORT")).To(Succeed())
+		})
+
+		It("decodes an unquoted ${VAR} into an int field and keeps quoted values as strings", func() {
+			Expect(os.Setenv("APP_PORT", "9090")).To(Succeed())
+			content := "version: v1\napp-technology: golang\napp-config:\n  port: ${APP_PORT}\n" +
+				"  environment:\n    PORT: \"${APP_PORT}\"\ntest-launcher: test-launcher-back\n"
+			configFile := filepath.Join(tempDir, "typed.yml")
+			Expect(os.WriteFile(configFile, []byte(content), 0644)).To(Succeed())
+
+			cfg, err := loader.Load(configFile)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfg.AppConfig.Port).To(Equal(9090))
+			Expect(cfg.AppConfig.Environment["PORT"]).To(Equal("9090"))
+		})
+
+		It("keeps defaults for an empty file", func() {
+			configFile := filepath.Join(tempDir, "empty.yml")
+			Expect(os.WriteFile(configFile, []byte(""), 0644)).To(Succeed())
+
+			cfg, err := loader.Load(configFile)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfg.Orchestration.HealthCheckRetries).To(Equal(60))
+		})
+	})
+
 	Describe("Environment Overrides (GTOOL_* variables)", func() {
 		AfterEach(func() {
-			os.Unsetenv("GTOOL_LOG_LEVEL")
-			os.Unsetenv("GTOOL_PARALLEL_MOCKS")
-			os.Unsetenv("GTOOL_DOCKER_IMAGE")
+			Expect(os.Unsetenv("GTOOL_LOG_LEVEL")).To(Succeed())
+			Expect(os.Unsetenv("GTOOL_PARALLEL_MOCKS")).To(Succeed())
+			Expect(os.Unsetenv("GTOOL_DOCKER_IMAGE")).To(Succeed())
 		})
 
 		It("should override log level", func() {
-			os.Setenv("GTOOL_LOG_LEVEL", "debug")
+			Expect(os.Setenv("GTOOL_LOG_LEVEL", "debug")).To(Succeed())
 
 			cfg, err := loader.Load(baseForOverridesPath)
 
@@ -389,7 +419,7 @@ var _ = Describe("Loader", func() {
 		})
 
 		It("should override parallel mocks to false", func() {
-			os.Setenv("GTOOL_PARALLEL_MOCKS", "false")
+			Expect(os.Setenv("GTOOL_PARALLEL_MOCKS", "false")).To(Succeed())
 
 			cfg, err := loader.Load(baseForOverridesPath)
 
@@ -398,7 +428,7 @@ var _ = Describe("Loader", func() {
 		})
 
 		It("should override parallel mocks to true", func() {
-			os.Setenv("GTOOL_PARALLEL_MOCKS", "true")
+			Expect(os.Setenv("GTOOL_PARALLEL_MOCKS", "true")).To(Succeed())
 
 			cfg, err := loader.Load(baseForOverridesPath)
 
@@ -407,7 +437,7 @@ var _ = Describe("Loader", func() {
 		})
 
 		It("should override docker image", func() {
-			os.Setenv("GTOOL_DOCKER_IMAGE", "custom-image:v2")
+			Expect(os.Setenv("GTOOL_DOCKER_IMAGE", "custom-image:v2")).To(Succeed())
 
 			cfg, err := loader.Load(baseForOverridesPath)
 
@@ -416,9 +446,9 @@ var _ = Describe("Loader", func() {
 		})
 
 		It("should override multiple values", func() {
-			os.Setenv("GTOOL_LOG_LEVEL", "warn")
-			os.Setenv("GTOOL_PARALLEL_MOCKS", "false")
-			os.Setenv("GTOOL_DOCKER_IMAGE", "override:latest")
+			Expect(os.Setenv("GTOOL_LOG_LEVEL", "warn")).To(Succeed())
+			Expect(os.Setenv("GTOOL_PARALLEL_MOCKS", "false")).To(Succeed())
+			Expect(os.Setenv("GTOOL_DOCKER_IMAGE", "override:latest")).To(Succeed())
 
 			cfg, err := loader.Load(baseForOverridesPath)
 
@@ -450,7 +480,7 @@ var _ = Describe("Loader", func() {
 		It("should load from default path when empty string provided", func() {
 			originalDir, err := os.Getwd()
 			Expect(err).NotTo(HaveOccurred())
-			defer os.Chdir(originalDir)
+			defer func() { Expect(os.Chdir(originalDir)).To(Succeed()) }()
 
 			// Solve absolute path for minimal config
 			absPath, err := filepath.Abs(minimalConfigPath)

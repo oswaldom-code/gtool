@@ -1,7 +1,7 @@
-// Package stablekarate reproduces the launch_tests
-// step: it runs the test-launcher-back (Karate) STABLE image on the host
-// network against the already-running app and mocks, mounting the feature files
-// and writing the HTML report to the host, and can open that report in a browser.
+// Package stablekarate runs the Karate launcher for the fixed-contract mode: it
+// runs the image on the host network against the already-running app and
+// mocks, mounting test/component/features and writing the HTML report to the
+// host, and can open that report in a browser.
 package stablekarate
 
 import (
@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	dockertypes "github.com/docker/docker/api/types"
@@ -17,6 +18,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	"github.com/oswaldom-code/gtool/internal/infra/termout"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
@@ -50,7 +52,7 @@ type DockerClient interface {
 
 // Options configures a Karate run.
 type Options struct {
-	Image        string // defaults to the STABLE test-launcher-back image
+	Image        string // defaults to the gtool test-launcher-back image
 	Tags         string
 	UrlsToBlock  string
 	FeaturesPath string // defaults to test/component/features
@@ -82,7 +84,7 @@ func New(d DockerClient, logger *zap.Logger) *Runner {
 }
 
 // Run executes the Karate suite and returns the result. It assumes the mocks
-// and app are already running (like the legacy "component e").
+// and app are already running.
 func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	image := opts.Image
 	if image == "" {
@@ -104,20 +106,16 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "invalid reports path")
 	}
+	if err := safeToClean(reportsAbs, featuresAbs); err != nil {
+		return nil, err
+	}
 
 	if err := r.docker.EnsureImage(ctx, image); err != nil {
 		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "failed to ensure test launcher image")
 	}
 
-	// Reset the reports dir, mirroring the legacy "rm -rf && mkdir -p". The
-	// launcher runs as root, so a previous run leaves root-owned files our user
-	// can't delete; if removal fails, chown them back (via a root container) and
-	// retry, replacing the legacy "sudo rm -rf".
 	if err := os.RemoveAll(reportsAbs); err != nil {
-		r.chownToUser(ctx, image, reportsAbs)
-		if err := os.RemoveAll(reportsAbs); err != nil {
-			r.logger.Warn("could not clean reports dir", zap.String("path", reportsAbs), zap.Error(err))
-		}
+		r.logger.Warn("could not clean reports dir", zap.String("path", reportsAbs), zap.Error(err))
 	}
 	if err := os.MkdirAll(reportsAbs, 0o755); err != nil {
 		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "failed to create reports directory")
@@ -137,6 +135,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 		},
 		NetworkMode: "host",
 		Init:        true,
+		User:        docker.HostUser(),
 		Labels:      map[string]string{"managed-by": "gtool", "gtool-role": "karate"},
 	})
 	if err != nil {
@@ -148,7 +147,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 		}
 	}()
 
-	fmt.Printf("🥋 Running Karate tests...\n")
+	termout.Printf("🥋 Running Karate tests...\n")
 	start := time.Now()
 	if err := r.docker.StartContainer(ctx, containerID); err != nil {
 		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "failed to start test container")
@@ -158,9 +157,9 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 	duration := time.Since(start)
 
-	exitCode := 0
-	if inspect, err := r.docker.InspectContainer(ctx, containerID); err == nil && inspect.State != nil {
-		exitCode = inspect.State.ExitCode
+	exitCode, err := docker.ExitCode(r.docker.InspectContainer(ctx, containerID))
+	if err != nil {
+		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "could not determine the test result")
 	}
 	if logs, err := r.docker.GetContainerLogs(ctx, containerID, 2000); err == nil {
 		fmt.Println(logs)
@@ -168,14 +167,10 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 
 	result := &Result{Passed: exitCode == 0, ExitCode: exitCode, Duration: duration}
 
-	// The launcher wrote the report as root; hand ownership back to the invoking
-	// user so it can be read/opened (e.g. by a sandboxed browser) and cleaned up.
-	r.chownToUser(ctx, image, reportsAbs)
-
 	summary := filepath.Join(reportsAbs, summaryFile)
 	if _, statErr := os.Stat(summary); statErr == nil {
 		result.ReportPath = summary
-		fmt.Printf("📊 Report: %s\n", summary)
+		termout.Printf("📊 Report: %s\n", summary)
 		if opts.Open {
 			if err := r.opener(summary); err != nil {
 				r.logger.Warn("could not open report", zap.Error(err))
@@ -186,35 +181,32 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	return result, nil
 }
 
-// chownToUser hands ownership of the reports tree back to the invoking user by
-// running chown inside a short-lived root container (the launcher writes the
-// reports as root). Best-effort: failures are logged, not fatal.
-func (r *Runner) chownToUser(ctx context.Context, image, reportsAbs string) {
-	uid, gid := os.Getuid(), os.Getgid()
-	if uid < 0 || gid < 0 {
-		return // not a Unix host
-	}
+// isWithin reports whether path is dir or lies inside it.
+func isWithin(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
 
-	id, err := r.docker.CreateContainer(ctx, &docker.ContainerConfig{
-		Image:      image,
-		Entrypoint: []string{"chown"},
-		Cmd:        []string{"-R", fmt.Sprintf("%d:%d", uid, gid), reportsTarget},
-		Mounts:     []docker.Mount{{Type: "bind", Source: reportsAbs, Target: reportsTarget}},
-		Labels:     map[string]string{"managed-by": "gtool", "gtool-role": "chown"},
-	})
-	if err != nil {
-		r.logger.Warn("could not create chown container", zap.Error(err))
-		return
+// safeToClean refuses to wipe a reports directory that would take the
+// project, the home directory or the features with it (e.g. --reports .).
+func safeToClean(reportsAbs, featuresAbs string) error {
+	refuse := func(what string) error {
+		return gtErrors.New(gtErrors.ErrInvalidArgument, fmt.Sprintf(
+			"refusing to use %s as reports directory: it would delete %s", reportsAbs, what))
 	}
-	defer func() { _ = r.docker.RemoveContainer(context.Background(), id, true) }()
-
-	if err := r.docker.StartContainer(ctx, id); err != nil {
-		r.logger.Warn("could not start chown container", zap.Error(err))
-		return
+	if reportsAbs == filepath.Dir(reportsAbs) {
+		return refuse("the filesystem root")
 	}
-	if err := r.docker.WaitForContainer(ctx, id, container.WaitConditionNotRunning); err != nil {
-		r.logger.Warn("chown container did not finish cleanly", zap.Error(err))
+	if home, err := os.UserHomeDir(); err == nil && isWithin(home, reportsAbs) {
+		return refuse("the home directory")
 	}
+	if wd, err := os.Getwd(); err == nil && isWithin(wd, reportsAbs) {
+		return refuse("the working directory")
+	}
+	if isWithin(featuresAbs, reportsAbs) {
+		return refuse("the features directory")
+	}
+	return nil
 }
 
 func orDefault(v, def string) string {
@@ -227,5 +219,9 @@ func orDefault(v, def string) string {
 // openInBrowser opens a file/URL with the platform's default handler.
 func openInBrowser(path string) error {
 	cmd := exec.Command("xdg-open", path)
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
 }

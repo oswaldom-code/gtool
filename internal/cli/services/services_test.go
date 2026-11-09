@@ -1,8 +1,10 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -101,6 +103,31 @@ func TestRunServicesLogs_RequiresServiceOrAll(t *testing.T) {
 }
 
 func TestRunServicesUp(t *testing.T) {
+	t.Run("rejects auto ports outside single-invocation pipelines", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "component-config.yml")
+		require.NoError(t, os.WriteFile(path, []byte(`version: v1
+app-technology: generic
+test-launcher: test-launcher-back
+app-config:
+  docker-image: app:1
+third-party:
+  mocks: [postgresql]
+  mock-config:
+    postgresql:
+      port: auto
+`), 0o600))
+		cfgFile = &path
+		t.Cleanup(func() { cfgFile = nil })
+		mgr := &fakeManager{}
+		injectDeps(t, mgr, nil)
+
+		err := runServicesUp(newServicesUpCmd(), nil)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "gtool test")
+		assert.Empty(t, mgr.startedSvc)
+	})
+
 	t.Run("starts requested services", func(t *testing.T) {
 		cfgFile = nil
 		mgr := &fakeManager{}
@@ -119,7 +146,7 @@ func TestRunServicesUp(t *testing.T) {
 		err := runServicesUp(newServicesUpCmd(), []string{"postgresql"})
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Docker daemon not available")
+		assert.Contains(t, err.Error(), "docker daemon not available")
 	})
 
 	t.Run("errors when no services configured", func(t *testing.T) {
@@ -280,33 +307,47 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-func TestLoadConfigOrDefault(t *testing.T) {
-	t.Run("loads explicit config file", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "config.yml")
-		content := []byte("version: v1\n" +
-			"app-technology: golang\n" +
-			"app-config:\n" +
-			"  binary-name: test-app\n" +
-			"  port: 8080\n" +
-			"test-launcher: test-launcher-back\n")
-		require.NoError(t, os.WriteFile(path, content, 0o600))
+func TestRunServicesLogs_Follow(t *testing.T) {
+	t.Cleanup(func() { followLogs, allLogs, cfgFile = false, false, nil })
 
-		cfg, err := loadConfigOrDefault(path)
+	var followed string
+	orig := newServiceDeps
+	t.Cleanup(func() { newServiceDeps = orig })
+	newServiceDeps = func(_ *config.Config, _ *zap.Logger) (*serviceDeps, error) {
+		return &serviceDeps{
+			manager: &fakeManager{},
+			ping:    func(context.Context) error { return nil },
+			close:   func() error { return nil },
+			follow: func(_ context.Context, service string, tail int, w io.Writer) error {
+				followed = service
+				_, _ = io.WriteString(w, "line\n")
+				return nil
+			},
+		}, nil
+	}
 
-		require.NoError(t, err)
-		require.NotNil(t, cfg)
-		assert.Equal(t, "golang", cfg.AppTechnology)
-	})
+	cmd := newServicesLogsCmd()
+	followLogs = true
+	var out bytes.Buffer
+	cmd.SetOut(&out)
 
-	t.Run("returns error for invalid explicit path", func(t *testing.T) {
-		_, err := loadConfigOrDefault(filepath.Join(t.TempDir(), "does-not-exist.yml"))
-		require.Error(t, err)
-	})
+	require.NoError(t, runServicesLogs(cmd, []string{"postgresql"}))
+	assert.Equal(t, "postgresql", followed)
+	assert.Equal(t, "line\n", out.String())
+}
 
-	t.Run("falls back to defaults when no file given", func(t *testing.T) {
-		cfg, err := loadConfigOrDefault("")
+func TestRunServicesLogs_InvalidFlagCombinations(t *testing.T) {
+	t.Cleanup(func() { followLogs, allLogs, cfgFile = false, false, nil })
+	injectDeps(t, &fakeManager{}, nil)
 
-		require.NoError(t, err)
-		require.NotNil(t, cfg)
-	})
+	cmd := newServicesLogsCmd()
+	allLogs = true
+	err := runServicesLogs(cmd, []string{"postgresql"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not both", "--all must not silently drop service names")
+
+	allLogs, followLogs = false, true
+	err = runServicesLogs(cmd, []string{"postgresql", "kafka"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "one service at a time")
 }

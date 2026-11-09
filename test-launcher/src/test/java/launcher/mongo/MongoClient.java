@@ -10,20 +10,23 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.MongoClients;
 
+import launcher.util.RunPorts;
+
 /**
  * MongoDB helper for seeding and asserting documents against a running MongoDB.
  * Filters and documents are passed as JSON strings. Exposed to Karate via Java.type.
  */
-public class MongoClient {
+public class MongoClient implements AutoCloseable {
 
     private final com.mongodb.client.MongoClient client;
     private final MongoDatabase database;
 
     /**
-     * @param config {@code connectionString} (e.g. mongodb://localhost:27017), {@code database}.
+     * @param config {@code connectionString} (default: this run's mongodb port on localhost), {@code database}.
      */
     public MongoClient(final Map<String, Object> config) {
-        final String connectionString = (String) config.get("connectionString");
+        final String connectionString = config.getOrDefault("connectionString",
+                "mongodb://localhost:" + RunPorts.port("mongodb", "27017")).toString();
         final String databaseName = (String) config.get("database");
         this.client = MongoClients.create(connectionString);
         this.database = client.getDatabase(databaseName);
@@ -63,5 +66,10 @@ public class MongoClient {
     /** Delete documents matching the JSON filter. Returns the deleted count. */
     public Long delete(final String collection, final String filterJson) {
         return collection(collection).deleteMany(Document.parse(filterJson)).getDeletedCount();
+    }
+
+    @Override
+    public void close() {
+        client.close();
     }
 }

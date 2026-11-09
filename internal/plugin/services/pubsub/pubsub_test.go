@@ -1,6 +1,7 @@
 package pubsub
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -51,7 +52,7 @@ func TestParseConfig(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "18085", got.Port)
 		assert.Equal(t, "my-project", got.ProjectID)
-		assert.Equal(t, []string{"orders", "payments"}, got.Topics)
+		assert.Equal(t, []string{"orders", "42", "payments"}, got.Topics)
 		require.Len(t, got.Subscriptions, 1)
 		assert.Equal(t, SubscriptionConfig{Name: "orders-sub", Topic: "orders"}, got.Subscriptions[0])
 	})
@@ -102,7 +103,7 @@ func TestResourceURLs(t *testing.T) {
 func TestIsReady_NotStarted(t *testing.T) {
 	p := NewPubSubPlugin(nil, nil)
 
-	ready, err := p.IsReady(nil)
+	ready, err := p.IsReady(context.TODO())
 
 	assert.False(t, ready)
 	require.Error(t, err)
@@ -112,7 +113,7 @@ func TestIsReady_NotStarted(t *testing.T) {
 func TestStop_NoContainer(t *testing.T) {
 	p := NewPubSubPlugin(nil, zap.NewNop())
 
-	err := p.Stop(nil)
+	err := p.Stop(context.TODO())
 	assert.NoError(t, err)
 }
 

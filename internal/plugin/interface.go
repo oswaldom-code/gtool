@@ -14,22 +14,6 @@ type ServicePlugin interface {
 	GetLogs(ctx context.Context, opts *LogOptions) ([]string, error)
 }
 
-type AppLauncher interface {
-	Technology() string
-	Launch(ctx context.Context, config *AppConfig) error
-	IsReady(ctx context.Context) (bool, error)
-	Stop(ctx context.Context) error
-	Restart(ctx context.Context) error
-	GetPID() (int, error)
-}
-
-type TestExecutor interface {
-	Framework() string
-	Execute(ctx context.Context, config *TestConfig) (*TestResult, error)
-	Cancel(ctx context.Context) error
-	GetProgress(ctx context.Context) (*TestProgress, error)
-}
-
 type ConnectionInfo struct {
 	Host     string
 	Port     int
@@ -49,16 +33,9 @@ type AppConfig struct {
 	BinaryPath  string
 	DockerImage string
 	Port        int
+	HostPort    int
 	Environment map[string]string
 	WorkDir     string
-}
-
-type TestConfig struct {
-	Tags         []string
-	FeaturesPath string
-	ReportsPath  string
-	Parallel     bool
-	Environment  map[string]string
 }
 
 type TestResult struct {
@@ -76,10 +53,4 @@ type TestFailure struct {
 	Feature string
 	Message string
 	Stack   string
-}
-
-type TestProgress struct {
-	Current int
-	Total   int
-	Running string
 }

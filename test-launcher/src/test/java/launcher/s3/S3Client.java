@@ -17,17 +17,17 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 /**
- * S3-compatible object storage helper (AWS S3 or MinIO via endpoint override),
+ * S3-compatible object storage helper (AWS S3 or a local emulator via endpoint override),
  * for seeding and asserting objects. Exposed to Karate via Java.type.
  */
-public class S3Client {
+public class S3Client implements AutoCloseable {
 
     private final software.amazon.awssdk.services.s3.S3Client s3;
 
     /**
-     * @param config {@code endpoint} (optional, e.g. http://localhost:9000 for MinIO),
+     * @param config {@code endpoint} (optional, e.g. http://localhost:4566 for the floci mock),
      *               {@code region} (default us-east-1), {@code accessKey}, {@code secretKey}.
-     *               Path-style access is enabled for MinIO compatibility.
+     *               Path-style access is enabled for emulator compatibility.
      */
     public S3Client(final Map<String, Object> config) {
         final String region = config.getOrDefault("region", "us-east-1").toString();
@@ -83,5 +83,10 @@ public class S3Client {
     /** Delete an object. */
     public void deleteObject(final String bucket, final String key) {
         s3.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
+    }
+
+    @Override
+    public void close() {
+        s3.close();
     }
 }

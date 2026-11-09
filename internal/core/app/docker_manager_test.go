@@ -32,7 +32,7 @@ type fakeDocker struct {
 	startedID string
 }
 
-func (d *fakeDocker) PullImage(_ context.Context, image string) error {
+func (d *fakeDocker) EnsureImage(_ context.Context, image string) error {
 	d.pulled = image
 	return d.pullErr
 }
@@ -87,7 +87,19 @@ func TestDockerManager_Start(t *testing.T) {
 		assert.Equal(t, "myapp:latest", d.created.Image)
 		assert.Equal(t, map[string]string{"8080": "8080"}, d.created.PortBindings)
 		assert.Contains(t, d.created.Env, "FOO=bar")
+		assert.Equal(t, []string{"host.docker.internal:host-gateway"}, d.created.ExtraHosts)
 		assert.Equal(t, "app", d.created.Labels["gtool-role"])
+		assert.Equal(t, []string{"host.docker.internal:host-gateway"}, d.created.ExtraHosts)
+	})
+
+	t.Run("publishes on a distinct host port", func(t *testing.T) {
+		d := &fakeDocker{}
+		m := NewDockerManager(d, nil)
+
+		err := m.Start(ctx, &plugin.AppConfig{DockerImage: "myapp:latest", Port: 8080, HostPort: 41234})
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"8080": "41234"}, d.created.PortBindings)
 	})
 
 	t.Run("requires docker image", func(t *testing.T) {
@@ -97,6 +109,27 @@ func TestDockerManager_Start(t *testing.T) {
 
 		require.Error(t, err)
 		assert.True(t, gtErrors.Is(err, gtErrors.ErrInvalidArgument))
+	})
+
+	t.Run("replaces an exited container instead of refusing to start", func(t *testing.T) {
+		d := &fakeDocker{containers: []types.Container{{ID: "old", State: "exited"}}}
+		m := NewDockerManager(d, nil)
+
+		err := m.Start(ctx, &plugin.AppConfig{DockerImage: "myapp:latest", Port: 8080})
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"old"}, d.removed)
+		assert.Equal(t, "container-id", d.startedID)
+	})
+
+	t.Run("fails when an exited container cannot be removed", func(t *testing.T) {
+		d := &fakeDocker{containers: []types.Container{{ID: "old", State: "exited"}}, removeErr: errors.New("busy")}
+		m := NewDockerManager(d, nil)
+
+		err := m.Start(ctx, &plugin.AppConfig{DockerImage: "myapp:latest"})
+
+		require.Error(t, err)
+		assert.True(t, gtErrors.Is(err, gtErrors.ErrDockerFailed))
 	})
 
 	t.Run("fails when already running", func(t *testing.T) {
@@ -109,7 +142,18 @@ func TestDockerManager_Start(t *testing.T) {
 		assert.Contains(t, err.Error(), "already running")
 	})
 
-	t.Run("wraps pull failure", func(t *testing.T) {
+	t.Run("removes the container when start fails", func(t *testing.T) {
+		d := &fakeDocker{startErr: errors.New("port is already allocated")}
+		m := NewDockerManager(d, nil)
+
+		err := m.Start(ctx, &plugin.AppConfig{DockerImage: "myapp:latest"})
+
+		require.Error(t, err)
+		assert.True(t, gtErrors.Is(err, gtErrors.ErrDockerFailed))
+		assert.Equal(t, []string{"container-id"}, d.removed)
+	})
+
+	t.Run("wraps image failure", func(t *testing.T) {
 		d := &fakeDocker{pullErr: errors.New("boom")}
 		m := NewDockerManager(d, nil)
 

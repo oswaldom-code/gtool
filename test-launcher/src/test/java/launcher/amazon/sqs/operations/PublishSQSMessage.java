@@ -7,11 +7,13 @@ import org.slf4j.LoggerFactory;
 
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
-import software.amazon.awssdk.services.sqs.model.SqsException;
+
+import launcher.util.RunPorts;
 
 /**
  * Publishes a message to an SQS queue on a local endpoint (e.g. LocalStack).
@@ -26,19 +28,22 @@ public class PublishSQSMessage {
         public String message;
     }
 
-    private final SqsClient sqsClient = SqsClient.builder()
-            .region(Region.US_EAST_1)
-            .endpointOverride(URI.create("http://localhost:4566"))
-            .credentialsProvider(StaticCredentialsProvider.create(
-                    AwsBasicCredentials.builder()
-                            .accountId("000000000000")
-                            .accessKeyId("test")
-                            .secretAccessKey("test")
-                            .build()))
-            .build();
+    private static SqsClient newClient() {
+        return SqsClient.builder()
+                .region(Region.US_EAST_1)
+                .endpointOverride(URI.create("http://localhost:" + RunPorts.port("floci", "4566")))
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.builder()
+                                .accountId("000000000000")
+                                .accessKeyId("test")
+                                .secretAccessKey("test")
+                                .build()))
+                .build();
+    }
 
+    /** Publishes one message; any failure (including an unreachable endpoint) is "KO". */
     public String run(final SQSData sqsData) {
-        try {
+        try (SqsClient sqsClient = newClient()) {
             final String queueUrl = sqsClient.getQueueUrl(
                     GetQueueUrlRequest.builder().queueName(sqsData.queueName).build()).queueUrl();
 
@@ -46,12 +51,10 @@ public class PublishSQSMessage {
                     .queueUrl(queueUrl)
                     .messageBody(sqsData.message)
                     .build());
-        } catch (SqsException e) {
+            return "OK";
+        } catch (SdkException e) {
             logger.error("Exception publishing message to SQS", e);
             return "KO";
-        } finally {
-            sqsClient.close();
         }
-        return "OK";
     }
 }

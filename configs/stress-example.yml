@@ -1,0 +1,66 @@
+# Stress test of examples/postgres-app. Run from the repository root:
+#
+#   docker build -t postgres-app:latest examples/postgres-app
+#   gtool stress plan --config configs/stress-example.yml
+#   gtool stress --config configs/stress-example.yml
+#
+# Paths are relative to the working directory.
+version: v1
+
+app-technology: golang
+test-launcher: test-launcher-back
+app-config:
+  docker-image: postgres-app:latest
+  port: 8080
+  host-port: auto
+  environment:
+    DB_HOST: host.docker.internal
+    DB_PORT: "${mocks.postgresql.port}"
+    DB_USER: postgres
+    DB_PASSWORD: postgres
+    DB_NAME: postgres
+
+third-party:
+  mocks:
+    - postgresql
+  mock-config:
+    postgresql:
+      port: auto
+      user: postgres
+      password: postgres
+      database: postgres
+      scripts-path: ./examples/postgres-app/test/component/mocks-data/postgresql
+
+stress-config:
+  source:
+    # Swagger 2.0 or OpenAPI 3.x. Hosts in servers/basePath are ignored: the
+    # load always goes to the pipeline app (or --target-url).
+    openapi: ./examples/postgres-app/api/openapi.yml
+    # Only GET by default: writes fill the mocks and distort the measurement.
+    methods: [GET]
+    include-tags: [users]
+    exclude-paths: ["/health"]
+    headers:
+      Accept: application/json
+    # param-values:
+    #   userId: ["1", "2", "3"]
+    # operation-overrides:
+    #   createUser: { body-file: test/stress/user.json, weight: 1 }
+  # Explicit targets complement the contract and replace an operation with the
+  # same method and path.
+  targets:
+    - name: health
+      method: GET
+      path: /health
+      weight: 1
+  ramp:
+    start-rps: 50
+    step-rps: 50
+    step-duration: 10s
+    max-rps: 500
+  thresholds:
+    degradation-latency-factor: 2.0   # p95 over 2x the baseline stage
+    degradation-p95-ms: 200           # or over this absolute SLO
+    break-error-rate: 0.05            # 5xx + network errors over 5%
+  min-acceptable-rps: 100
+  reports-path: ./examples/postgres-app/test/stress/reports

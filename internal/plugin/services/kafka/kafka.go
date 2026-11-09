@@ -9,6 +9,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/svcconfig"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -23,9 +24,26 @@ const (
 	// (health check, topic creation). It is independent of the host port so it
 	// works regardless of how the external listener is mapped.
 	internalBootstrap = "localhost:29092"
+	// dockerListenerPort serves clients running in other containers (e.g. the
+	// app under test), advertised through the host gateway.
+	dockerListenerPort = "9094"
 	// kafkaTopicsBin is the path to the kafka-topics CLI in the apache/kafka image.
 	kafkaTopicsBin = "/opt/kafka/bin/kafka-topics.sh"
 )
+
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "port", "docker-port", "partitions", "topics", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"port":        defaultPort,
+		"docker-port": dockerListenerPort,
+	}
+}
 
 // KafkaPlugin implements the ServicePlugin interface for a single-node Kafka
 // broker running in KRaft mode.
@@ -40,6 +58,7 @@ type KafkaPlugin struct {
 type KafkaConfig struct {
 	Image         string   `json:"image"`
 	Port          string   `json:"port"`
+	DockerPort    string   `json:"docker-port"`
 	Topics        []string `json:"topics"`
 	Partitions    int      `json:"partitions"`
 	ContainerName string   `json:"container-name"`
@@ -72,9 +91,9 @@ func (p *KafkaPlugin) Launch(ctx context.Context, config map[string]interface{})
 	}
 	p.config = cfg
 
-	p.logger.Info("pulling Kafka image", zap.String("image", cfg.Image))
-	if err := p.docker.PullImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull Kafka image")
+	p.logger.Info("ensuring Kafka image", zap.String("image", cfg.Image))
+	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get Kafka image")
 	}
 
 	containerConfig := &docker.ContainerConfig{
@@ -82,7 +101,8 @@ func (p *KafkaPlugin) Launch(ctx context.Context, config map[string]interface{})
 		Name:  cfg.ContainerName,
 		Env:   p.brokerEnv(cfg),
 		PortBindings: map[string]string{
-			"9092": cfg.Port,
+			"9092":             cfg.Port,
+			dockerListenerPort: cfg.DockerPort,
 		},
 		Labels: map[string]string{
 			"managed-by": "gtool",
@@ -94,16 +114,11 @@ func (p *KafkaPlugin) Launch(ctx context.Context, config map[string]interface{})
 		zap.String("name", cfg.ContainerName),
 		zap.String("port", cfg.Port))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create Kafka container")
-	}
-	p.containerID = containerID
-
-	p.logger.Info("starting Kafka container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start Kafka container")
 	}
+	p.containerID = containerID
 
 	p.logger.Info("waiting for Kafka to be ready")
 	if err := p.waitForReady(ctx); err != nil {
@@ -116,10 +131,8 @@ func (p *KafkaPlugin) Launch(ctx context.Context, config map[string]interface{})
 	if len(cfg.Topics) > 0 {
 		p.logger.Info("creating topics", zap.Strings("topics", cfg.Topics))
 		if err := p.createTopics(ctx, cfg.Topics, cfg.Partitions); err != nil {
-			// Don't fail the launch if topic creation fails, just log the error
-			p.logger.Error("failed to create topics",
-				zap.Error(err),
-				zap.Strings("topics", cfg.Topics))
+			_ = p.Stop(context.Background())
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to create Kafka topics")
 		}
 	}
 
@@ -184,6 +197,7 @@ func (p *KafkaPlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found Kafka container",
@@ -192,10 +206,13 @@ func (p *KafkaPlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -217,6 +234,7 @@ func (p *KafkaPlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("Kafka service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -298,48 +316,38 @@ func (p *KafkaPlugin) parseConfig(config map[string]interface{}) (*KafkaConfig, 
 	cfg := &KafkaConfig{
 		Image:         defaultImage,
 		Port:          defaultPort,
+		DockerPort:    dockerListenerPort,
 		Partitions:    defaultPartitions,
 		ContainerName: fmt.Sprintf("%s-%d", containerNamePrefix, time.Now().Unix()),
 	}
 
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
-	if port, ok := config["port"].(string); ok && port != "" {
-		cfg.Port = port
-	} else if port, ok := config["port"].(float64); ok {
-		cfg.Port = fmt.Sprintf("%.0f", port)
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
+	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
+	cfg.DockerPort = svcconfig.Port(config, "docker-port", cfg.DockerPort)
 	if partitions, ok := config["partitions"].(float64); ok && partitions > 0 {
 		cfg.Partitions = int(partitions)
 	} else if partitions, ok := config["partitions"].(int); ok && partitions > 0 {
 		cfg.Partitions = partitions
 	}
-	if topics, ok := config["topics"].([]interface{}); ok {
-		for _, t := range topics {
-			if name, ok := t.(string); ok && name != "" {
-				cfg.Topics = append(cfg.Topics, name)
-			}
-		}
-	}
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
-	}
+	cfg.Topics = append(cfg.Topics, svcconfig.Strings(config, "topics")...)
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
 
 	return cfg, nil
 }
 
-// brokerEnv builds the KRaft single-node broker environment. Two PLAINTEXT
-// listeners are used: INTERNAL for in-container admin operations and EXTERNAL
-// (advertised on the host port) for clients running on the host.
+// brokerEnv builds the KRaft single-node broker environment. Three PLAINTEXT
+// listeners are used: INTERNAL for in-container admin operations, EXTERNAL
+// (advertised on the host port) for clients running on the host, and DOCKER
+// (advertised through host.docker.internal) for clients in other containers.
 func (p *KafkaPlugin) brokerEnv(cfg *KafkaConfig) []string {
 	return []string{
 		"KAFKA_NODE_ID=1",
 		"KAFKA_PROCESS_ROLES=broker,controller",
 		"KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093",
-		"KAFKA_LISTENERS=INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093",
-		fmt.Sprintf("KAFKA_ADVERTISED_LISTENERS=INTERNAL://%s,EXTERNAL://localhost:%s", internalBootstrap, cfg.Port),
-		"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT",
+		"KAFKA_LISTENERS=INTERNAL://:29092,EXTERNAL://:9092,DOCKER://:9094,CONTROLLER://:9093",
+		fmt.Sprintf("KAFKA_ADVERTISED_LISTENERS=INTERNAL://%s,EXTERNAL://localhost:%s,DOCKER://host.docker.internal:%s",
+			internalBootstrap, cfg.Port, cfg.DockerPort),
+		"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,DOCKER:PLAINTEXT",
 		"KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL",
 		"KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER",
 		"KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1",
@@ -357,6 +365,9 @@ func (p *KafkaPlugin) waitForReady(ctx context.Context) error {
 	for i := 0; i < maxRetries; i++ {
 		ready, err := p.IsReady(ctx)
 		if err != nil {
+			if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+				return err
+			}
 			p.logger.Debug("error checking readiness",
 				zap.Error(err),
 				zap.Int("attempt", i+1))
@@ -431,6 +442,8 @@ func (p *KafkaPlugin) bootstrapServers() string {
 // mustParsePort parses port string to int, returns 0 on error
 func mustParsePort(port string) int {
 	var p int
-	fmt.Sscanf(port, "%d", &p)
+	if _, err := fmt.Sscanf(port, "%d", &p); err != nil {
+		return 0
+	}
 	return p
 }

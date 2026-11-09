@@ -9,6 +9,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/internal/plugin"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/svcconfig"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -18,6 +19,19 @@ const (
 	defaultPort         = "6379"
 	containerNamePrefix = "gtool-redis"
 )
+
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "port", "password", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"port": defaultPort,
+	}
+}
 
 // RedisPlugin implements the ServicePlugin interface for Redis
 type RedisPlugin struct {
@@ -64,9 +78,9 @@ func (p *RedisPlugin) Launch(ctx context.Context, config map[string]interface{})
 	p.config = cfg
 
 	// Pull image
-	p.logger.Info("pulling Redis image", zap.String("image", cfg.Image))
+	p.logger.Info("ensuring Redis image", zap.String("image", cfg.Image))
 	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull Redis image")
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get Redis image")
 	}
 
 	// Create container
@@ -90,17 +104,11 @@ func (p *RedisPlugin) Launch(ctx context.Context, config map[string]interface{})
 		zap.String("name", cfg.ContainerName),
 		zap.String("port", cfg.Port))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create Redis container")
-	}
-	p.containerID = containerID
-
-	// Start container
-	p.logger.Info("starting Redis container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start Redis container")
 	}
+	p.containerID = containerID
 
 	// Wait for Redis to be ready
 	p.logger.Info("waiting for Redis to be ready")
@@ -146,7 +154,9 @@ func (p *RedisPlugin) IsReady(ctx context.Context) (bool, error) {
 		AttachStderr: true,
 	})
 
-	if err != nil {
+	// While loading the dataset or without auth redis-cli still exits 0 but
+	// answers LOADING/NOAUTH, so only PONG means ready.
+	if err != nil || !strings.Contains(output, "PONG") {
 		p.logger.Debug("Redis not ready yet", zap.String("output", output))
 		return false, nil
 	}
@@ -180,7 +190,7 @@ func (p *RedisPlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
-		// Stop all matching containers
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found Redis container",
@@ -189,10 +199,13 @@ func (p *RedisPlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -216,6 +229,7 @@ func (p *RedisPlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("Redis service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -306,20 +320,10 @@ func (p *RedisPlugin) parseConfig(config map[string]interface{}) (*RedisConfig, 
 	}
 
 	// Override with provided values
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
-	if port, ok := config["port"].(string); ok && port != "" {
-		cfg.Port = port
-	} else if port, ok := config["port"].(float64); ok {
-		cfg.Port = fmt.Sprintf("%.0f", port)
-	}
-	if password, ok := config["password"].(string); ok && password != "" {
-		cfg.Password = password
-	}
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
+	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
+	cfg.Password = svcconfig.String(config, "password", cfg.Password)
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
 
 	return cfg, nil
 }
@@ -332,6 +336,9 @@ func (p *RedisPlugin) waitForReady(ctx context.Context) error {
 	for i := 0; i < maxRetries; i++ {
 		ready, err := p.IsReady(ctx)
 		if err != nil {
+			if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+				return err
+			}
 			p.logger.Debug("error checking readiness",
 				zap.Error(err),
 				zap.Int("attempt", i+1))
@@ -357,6 +364,8 @@ func (p *RedisPlugin) waitForReady(ctx context.Context) error {
 // mustParsePort parses port string to int, panics on error
 func mustParsePort(port string) int {
 	var p int
-	fmt.Sscanf(port, "%d", &p)
+	if _, err := fmt.Sscanf(port, "%d", &p); err != nil {
+		return 0
+	}
 	return p
 }

@@ -8,8 +8,9 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import launcher.postgres.DatabaseConnectionSingleton;
 import launcher.postgres.Executor;
+import launcher.postgres.PostgresConnections;
+import launcher.util.SqlScript;
 
 public class ExecutorImpl extends DBConnector implements Executor {
 
@@ -19,31 +20,26 @@ public class ExecutorImpl extends DBConnector implements Executor {
         super(config);
     }
 
+    /** Runs the script in one transaction: it applies completely or not at all. */
     @Override
     public Boolean executeSqlScript(final String scriptName, final String sql) throws SQLException {
-        final Connection con = DatabaseConnectionSingleton.getInstance(config).connection;
-        final String[] statements = sql.split(";");
-        boolean ok = true;
+        final Connection con = PostgresConnections.get(config);
+        final String name = scriptName != null ? scriptName : "";
         String query = "";
-
+        con.setAutoCommit(false);
         try (Statement st = con.createStatement()) {
-            for (final String statement : statements) {
-                query = statement + ";";
-                if (!query.trim().equals(";")) {
-                    st.executeUpdate(query);
-                }
-                query = "";
+            for (final String statement : SqlScript.split(sql, true)) {
+                query = statement;
+                st.execute(statement);
             }
+            con.commit();
+            return true;
         } catch (SQLException e) {
-            final String name = scriptName != null ? scriptName : "";
             logger.error("{executeSqlScript} Could not execute script {}. Error executing query {}.", name, query, e);
-            try {
-                con.rollback();
-            } catch (SQLException re) {
-                logger.warn("{executeSqlScript} could not rollback after error.", re);
-            }
-            ok = false;
+            con.rollback();
+            return false;
+        } finally {
+            con.setAutoCommit(true);
         }
-        return ok;
     }
 }

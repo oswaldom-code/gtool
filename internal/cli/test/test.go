@@ -5,24 +5,28 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/oswaldom-code/gtool/internal/cli/cliconfig"
 	coreApp "github.com/oswaldom-code/gtool/internal/core/app"
 	"github.com/oswaldom-code/gtool/internal/core/app/nativeapp"
-	coreConfig "github.com/oswaldom-code/gtool/internal/core/config"
 	"github.com/oswaldom-code/gtool/internal/core/mock"
 	"github.com/oswaldom-code/gtool/internal/core/mock/stablemocks"
 	"github.com/oswaldom-code/gtool/internal/core/orchestrator"
+	"github.com/oswaldom-code/gtool/internal/core/ports"
 	coreTest "github.com/oswaldom-code/gtool/internal/core/test"
 	"github.com/oswaldom-code/gtool/internal/core/test/stablekarate"
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	"github.com/oswaldom-code/gtool/internal/infra/termout"
 	"github.com/oswaldom-code/gtool/internal/plugin"
 	pluginServices "github.com/oswaldom-code/gtool/internal/plugin/services"
 	"github.com/oswaldom-code/gtool/pkg/config"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 	"github.com/oswaldom-code/gtool/pkg/logger"
 )
 
@@ -48,15 +52,15 @@ var newPipeline depsFactory = defaultPipeline
 // defaultPipeline wires the real mock manager, app manager and (stub) test
 // runner into an orchestrator.
 func defaultPipeline(cfg *config.Config, log *zap.Logger) (*pipelineDeps, error) {
-	dockerClient, err := docker.NewClient(log)
+	dockerClient, err := docker.NewRunClient(log)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Docker client: %w", err)
+		return nil, gtErrors.Wrap(err, gtErrors.ErrDockerConnection, "failed to create Docker client")
 	}
 
 	registry := plugin.NewRegistry()
 	if err := pluginServices.RegisterAll(registry, dockerClient, log); err != nil {
 		_ = dockerClient.Close()
-		return nil, fmt.Errorf("failed to register plugins: %w", err)
+		return nil, gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to register plugins")
 	}
 
 	mockMgr := mock.NewManager(registry, log, cfg.Orchestration, dockerClient)
@@ -86,8 +90,8 @@ Whatever is started is always cleaned up, including on Ctrl-C.`,
 	}
 
 	cfgFile = configFile
-	cmd.Flags().BoolVar(&stableMode, "stable", false, "reproduce legacy 'component t' using STABLE mocks + native app + Karate")
-	cmd.Flags().StringVar(&stableTags, "tags", "", "Karate tags filter (with --stable)")
+	cmd.Flags().BoolVar(&stableMode, "stable", false, "fixed-contract mode: fixed mocks + native app + Karate")
+	cmd.Flags().StringVar(&stableTags, "tags", "", "Karate tags filter (overrides test-config.tags)")
 	cmd.Flags().StringVar(&stableBuildConfig, "build-config", "build-config.yml", "path to build-config.yml (with --stable)")
 	cmd.Flags().BoolVar(&stableNoOpen, "no-open", false, "do not open the HTML report when finished (with --stable)")
 	cmd.AddCommand(newKarateCmd())
@@ -108,64 +112,165 @@ var (
 	karateReports     string
 	karateImage       string
 	karateNoOpen      bool
+	karateStable      bool
 )
 
-// newKarateCmd builds `gtool test karate`, reproducing the legacy
-// "component e" (exec-only-tests): it runs the Karate launcher against the
-// already-running mocks and app and opens the HTML report.
+// karateRunner is the test-runner surface used by `gtool test karate`.
+// *coreTest.KarateRunner satisfies it; tests inject a fake.
+type karateRunner interface {
+	Run(ctx context.Context, cfg *config.Config) (*plugin.TestResult, error)
+}
+
+type karateFactory func(image string, log *zap.Logger) (karateRunner, func() error, error)
+
+var newKarateRunner karateFactory = defaultKarateRunner
+
+func defaultKarateRunner(image string, log *zap.Logger) (karateRunner, func() error, error) {
+	dockerClient, err := docker.NewClient(log)
+	if err != nil {
+		return nil, nil, gtErrors.Wrap(err, gtErrors.ErrDockerConnection, "failed to create Docker client")
+	}
+	return coreTest.NewKarateRunner(dockerClient, image, log), dockerClient.Close, nil
+}
+
+// newKarateCmd builds `gtool test karate`: it runs the Karate launcher against
+// mocks and app that are already running. With --stable it uses the
+// fixed-contract runner.
 func newKarateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "karate",
 		Short: "Run only the Karate component tests (mocks and app must already be running)",
 		Long: `Run the Karate backend test launcher against the already-running mocks and
-application, mounting test/component/features and writing the HTML report to
-test/component/reports. The report is opened in the browser when it finishes.
+application, using test-config (features-path, reports-path, tags) and the
+ports in the configuration. Ports must be explicit: auto is only supported
+by gtool test and gtool stress.
 
 Bring the environment up first with:
+  gtool services up
+  gtool app start
+
+With --stable it uses the fixed-contract runner instead: it mounts
+test/component/features, writes test/component/reports and opens the report.
+Pair it with:
   gtool services up --stable
   gtool app start --native`,
 		RunE: runKarate,
 	}
-	cmd.Flags().StringVar(&karateTags, "tags", "", "Karate tags filter (TAGS)")
-	cmd.Flags().StringVar(&karateUrlsToBlock, "urls-to-block", "", "comma-separated URLs to block")
-	cmd.Flags().StringVar(&karateFeatures, "features", "", "features path (default test/component/features)")
-	cmd.Flags().StringVar(&karateReports, "reports", "", "reports path (default test/component/reports)")
+	cmd.Flags().StringVar(&karateTags, "tags", "", "Karate tags filter (overrides test-config.tags)")
+	cmd.Flags().StringVar(&karateFeatures, "features", "", "features path (overrides test-config.features-path)")
+	cmd.Flags().StringVar(&karateReports, "reports", "", "reports path (overrides test-config.reports-path)")
 	cmd.Flags().StringVar(&karateImage, "image", "", "override the test launcher image")
-	cmd.Flags().BoolVar(&karateNoOpen, "no-open", false, "do not open the HTML report when finished")
+	cmd.Flags().BoolVar(&karateStable, "stable", false, "fixed-contract runner, paired with services up --stable + app start --native")
+	cmd.Flags().StringVar(&karateUrlsToBlock, "urls-to-block", "", "comma-separated URLs to block (with --stable)")
+	cmd.Flags().BoolVar(&karateNoOpen, "no-open", false, "do not open the HTML report when finished (with --stable)")
 	return cmd
 }
 
-func runKarate(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
-	log := logger.Default()
-	defer log.Sync()
+// karateStableOnlyFlags only change the --stable flow of `test karate`.
+var karateStableOnlyFlags = []string{"urls-to-block", "no-open"}
 
-	dockerClient, err := docker.NewClient(log.Logger)
+func rejectStableOnlyFlags(cmd *cobra.Command, names []string) error {
+	if cmd == nil {
+		return nil
+	}
+	for _, name := range names {
+		if f := cmd.Flag(name); f != nil && f.Changed {
+			return gtErrors.New(gtErrors.ErrInvalidArgument, fmt.Sprintf("--%s only applies with --stable", name))
+		}
+	}
+	return nil
+}
+
+func runStableKarate(ctx context.Context, log *zap.Logger) error {
+	dockerClient, err := docker.NewClient(log)
 	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrDockerConnection, "failed to create Docker client")
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 	if err := dockerClient.Ping(ctx); err != nil {
-		return fmt.Errorf("Docker daemon not available: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrDockerConnection, "docker daemon not available")
 	}
 
-	runner := stablekarate.New(dockerClient, log.Logger)
+	runner := stablekarate.New(dockerClient, log)
 	result, err := runner.Run(ctx, stablekarate.Options{
 		Image:        karateImage,
 		Tags:         karateTags,
 		UrlsToBlock:  karateUrlsToBlock,
 		FeaturesPath: karateFeatures,
 		ReportsPath:  karateReports,
-		Open:         !karateNoOpen,
+		Open:         !karateNoOpen && !termout.Plain(),
 	})
 	if err != nil {
 		return err
 	}
 	if !result.Passed {
-		return fmt.Errorf("karate tests failed (exit code %d)", result.ExitCode)
+		return gtErrors.New(gtErrors.ErrTestFailed, fmt.Sprintf("karate tests failed (exit code %d)", result.ExitCode))
 	}
-	fmt.Printf("✅ Karate tests passed in %s\n", result.Duration.Round(time.Second))
+	termout.Printf("✅ Karate tests passed in %s\n", result.Duration.Round(time.Second))
 	return nil
+}
+
+// applyKarateOverrides applies the --tags, --features and --reports flags.
+func applyKarateOverrides(cfg *config.Config) {
+	if karateTags != "" {
+		cfg.TestConfig.Tags = karateTags
+	}
+	if karateFeatures != "" {
+		cfg.TestConfig.FeaturesPath = karateFeatures
+	}
+	if karateReports != "" {
+		cfg.TestConfig.ReportsPath = karateReports
+	}
+}
+
+func runNativeKarate(ctx context.Context, log *zap.Logger) error {
+	cfg, err := cliconfig.Load(configFilePath(), cliconfig.Pipeline, os.Stderr)
+	if err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to load configuration")
+	}
+	applyKarateOverrides(cfg)
+	if _, err := ports.Resolve(cfg, ports.NoAuto); err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to resolve ports")
+	}
+
+	runner, closeRunner, err := newKarateRunner(karateImage, log)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = closeRunner() }()
+
+	termout.Println("🧪 Running Karate tests...")
+	result, err := runner.Run(ctx, cfg)
+	if err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrTestFailed, "test run failed")
+	}
+	fmt.Printf("  tests: %d total, %d passed, %d failed\n", result.Total, result.Passed, result.Failed)
+	if result.ReportURL != "" {
+		fmt.Printf("  report: %s\n", filepath.Join(result.ReportURL, "karate-summary.html"))
+	}
+	if result.Failed > 0 {
+		return gtErrors.New(gtErrors.ErrTestFailed, fmt.Sprintf("tests failed: %d of %d failed", result.Failed, result.Total))
+	}
+	termout.Printf("✅ Karate tests passed in %s\n", result.Duration.Round(time.Second))
+	return nil
+}
+
+func runKarate(cmd *cobra.Command, _ []string) error {
+	if !karateStable {
+		if err := rejectStableOnlyFlags(cmd, karateStableOnlyFlags); err != nil {
+			return err
+		}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	log := logger.Default()
+	defer func() { _ = log.Sync() }()
+
+	if karateStable {
+		return runStableKarate(ctx, log.Logger)
+	}
+	return runNativeKarate(ctx, log.Logger)
 }
 
 // configFilePath returns the current value of the --config flag, or "".
@@ -176,56 +281,79 @@ func configFilePath() string {
 	return *cfgFile
 }
 
-func runTest(_ *cobra.Command, _ []string) error {
+// stableOnlyFlags only change the --stable flow; passing them without it was
+// silently ignored before.
+var stableOnlyFlags = []string{"build-config", "no-open"}
+
+func runTest(cmd *cobra.Command, _ []string) error {
+	if !stableMode {
+		if err := rejectStableOnlyFlags(cmd, stableOnlyFlags); err != nil {
+			return err
+		}
+	}
+
 	log := logger.Default()
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	// Cancel the pipeline on Ctrl-C / SIGTERM; the orchestrator still tears down.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cfg, err := loadConfigOrDefault(configFilePath())
+	policy := cliconfig.Pipeline
+	if stableMode {
+		policy = cliconfig.Compat
+	}
+	cfg, err := cliconfig.Load(configFilePath(), policy, os.Stderr)
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to load configuration")
 	}
 
 	if stableMode {
 		return runStableTest(ctx, log.Logger, cfg)
 	}
+	if stableTags != "" {
+		cfg.TestConfig.Tags = stableTags
+	}
+
+	values, err := ports.Resolve(cfg, ports.FreePortAllocator())
+	if err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to resolve ports")
+	}
+	log.Info("resolved ports", zap.Any("ports", values))
 
 	deps, err := newPipeline(cfg, log.Logger)
 	if err != nil {
 		return err
 	}
-	defer deps.close()
+	defer func() { _ = deps.close() }()
 
-	fmt.Println("🧪 Running component test pipeline...")
+	termout.Println("🧪 Running component test pipeline...")
 	result, runErr := deps.pipeline.Run(ctx)
 	printResult(result)
 
 	if runErr != nil {
-		return fmt.Errorf("pipeline failed: %w", runErr)
+		return gtErrors.Wrap(runErr, gtErrors.ErrTestFailed, "pipeline failed")
 	}
 
 	if result != nil && result.Test != nil && result.Test.Failed > 0 {
-		return fmt.Errorf("tests failed: %d of %d failed", result.Test.Failed, result.Test.Total)
+		return gtErrors.New(gtErrors.ErrTestFailed, fmt.Sprintf("tests failed: %d of %d failed", result.Test.Failed, result.Test.Total))
 	}
 
-	fmt.Println("\n✅ Pipeline completed")
+	termout.Println("\n✅ Pipeline completed")
 	return nil
 }
 
-// runStableTest reproduces the legacy "component t": prepare STABLE mocks,
+// runStableTest runs the fixed-contract mode: prepare the fixed mocks,
 // launch the native app, run Karate, then always tear app and mocks down
 // (LIFO defers run even on test failure or Ctrl-C).
 func runStableTest(ctx context.Context, log *zap.Logger, cfg *config.Config) error {
 	dockerClient, err := docker.NewClient(log)
 	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrDockerConnection, "failed to create Docker client")
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 	if err := dockerClient.Ping(ctx); err != nil {
-		return fmt.Errorf("Docker daemon not available: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrDockerConnection, "docker daemon not available")
 	}
 
 	mocks, err := stablemocks.New(dockerClient, log)
@@ -238,39 +366,39 @@ func runStableTest(ctx context.Context, log *zap.Logger, cfg *config.Config) err
 	}
 	karate := stablekarate.New(dockerClient, log)
 
-	fmt.Println("▶ Phase 1/3: starting STABLE mocks...")
+	termout.Println("▶ Phase 1/3: starting fixed-contract mocks...")
 	if err := mocks.Up(ctx, nil, cfg); err != nil {
 		_ = mocks.Down(context.Background(), nil)
-		return fmt.Errorf("failed to start mocks: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to start mocks")
 	}
 	defer func() {
-		fmt.Println("🧹 Stopping mocks...")
+		termout.Println("🧹 Stopping mocks...")
 		_ = mocks.Down(context.Background(), nil)
 	}()
 
-	fmt.Println("\n▶ Phase 2/3: starting native app...")
+	termout.Println("\n▶ Phase 2/3: starting native app...")
 	if err := app.Start(ctx); err != nil {
 		_ = app.Stop(context.Background())
-		return fmt.Errorf("failed to start app: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to start app")
 	}
 	defer func() {
-		fmt.Println("🧹 Stopping app...")
+		termout.Println("🧹 Stopping app...")
 		_ = app.Stop(context.Background())
 	}()
 
-	fmt.Println("\n▶ Phase 3/3: running Karate tests...")
+	termout.Println("\n▶ Phase 3/3: running Karate tests...")
 	result, err := karate.Run(ctx, stablekarate.Options{
 		Tags: stableTags,
-		Open: !stableNoOpen,
+		Open: !stableNoOpen && !termout.Plain(),
 	})
 	if err != nil {
-		return fmt.Errorf("test run failed: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrTestFailed, "test run failed")
 	}
 	if !result.Passed {
-		return fmt.Errorf("tests failed (exit code %d)", result.ExitCode)
+		return gtErrors.New(gtErrors.ErrTestFailed, fmt.Sprintf("tests failed (exit code %d)", result.ExitCode))
 	}
 
-	fmt.Printf("\n✅ Pipeline completed (Karate passed in %s)\n", result.Duration.Round(time.Second))
+	termout.Printf("\n✅ Pipeline completed (Karate passed in %s)\n", result.Duration.Round(time.Second))
 	return nil
 }
 
@@ -284,16 +412,4 @@ func printResult(result *orchestrator.Result) {
 		fmt.Printf("  tests:         %d total, %d passed, %d failed\n",
 			result.Test.Total, result.Test.Passed, result.Test.Failed)
 	}
-}
-
-func loadConfigOrDefault(cfgFile string) (*config.Config, error) {
-	if cfgFile != "" {
-		return coreConfig.LoadConfig(cfgFile)
-	}
-
-	cfg, err := coreConfig.LoadConfig("")
-	if err != nil {
-		return config.DefaultConfig(), nil
-	}
-	return cfg, nil
 }

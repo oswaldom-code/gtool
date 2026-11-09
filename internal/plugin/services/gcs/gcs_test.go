@@ -1,6 +1,7 @@
 package gcs
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -45,7 +46,7 @@ func TestParseConfig(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "14443", got.Port)
 		assert.Equal(t, "my-project", got.ProjectID)
-		assert.Equal(t, []string{"uploads", "exports"}, got.Buckets)
+		assert.Equal(t, []string{"uploads", "42", "exports"}, got.Buckets)
 	})
 
 	t.Run("custom container name", func(t *testing.T) {
@@ -104,7 +105,7 @@ func TestBuildCmd(t *testing.T) {
 func TestIsReady_NotStarted(t *testing.T) {
 	p := NewGCSPlugin(nil, nil)
 
-	ready, err := p.IsReady(nil)
+	ready, err := p.IsReady(context.TODO())
 
 	assert.False(t, ready)
 	require.Error(t, err)
@@ -114,7 +115,7 @@ func TestIsReady_NotStarted(t *testing.T) {
 func TestStop_NoContainer(t *testing.T) {
 	p := NewGCSPlugin(nil, zap.NewNop())
 
-	err := p.Stop(nil)
+	err := p.Stop(context.TODO())
 	assert.NoError(t, err)
 }
 

@@ -1,0 +1,77 @@
+openapi: 3.0.3
+info:
+  title: Shop
+  version: "1.0"
+servers:
+  - url: http://shop.example.com/api/v1
+paths:
+  /health:
+    get:
+      operationId: health
+      tags: [ops]
+      responses:
+        "200": { description: ok }
+  /products:
+    get:
+      operationId: listProducts
+      tags: [products]
+      parameters:
+        - name: limit
+          in: query
+          required: true
+          schema: { type: integer, default: 20 }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [asc, desc] }
+        - name: X-Tenant
+          in: header
+          required: true
+          example: acme
+      responses:
+        "200": { description: ok }
+    post:
+      operationId: createProduct
+      tags: [products]
+      requestBody:
+        content:
+          text/plain:
+            schema: { type: string }
+          application/json:
+            example: { name: widget, price: 10 }
+      responses:
+        "201": { description: created }
+  /products/{productId}:
+    parameters:
+      - name: productId
+        in: path
+        required: true
+        schema: { type: string, example: p-1 }
+    get:
+      operationId: getProduct
+      tags: [products]
+      responses:
+        "200": { description: ok }
+  /orders:
+    post:
+      operationId: createOrder
+      tags: [orders]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantity]
+              properties:
+                quantity: { type: integer, minimum: 1, maximum: 1 }
+      responses:
+        "201": { description: created }
+  /orders/{orderId}:
+    get:
+      tags: [orders]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 7, maximum: 7 }
+      responses:
+        "200": { description: ok }

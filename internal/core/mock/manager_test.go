@@ -27,9 +27,11 @@ type fakePlugin struct {
 
 	launchErr   error
 	launchCalls int
+	launchDelay time.Duration
 
-	stopErr   error
-	stopCalls int
+	stopErr    error
+	stopCalls  int
+	stopCtxErr error
 
 	readyResults []readyResult
 	readyIdx     int
@@ -45,6 +47,7 @@ func (f *fakePlugin) Name() string { return f.name }
 
 func (f *fakePlugin) Launch(_ context.Context, _ map[string]interface{}) error {
 	f.launchCalls++
+	time.Sleep(f.launchDelay)
 	return f.launchErr
 }
 
@@ -61,8 +64,9 @@ func (f *fakePlugin) IsReady(_ context.Context) (bool, error) {
 	return r.ready, r.err
 }
 
-func (f *fakePlugin) Stop(_ context.Context) error {
+func (f *fakePlugin) Stop(ctx context.Context) error {
 	f.stopCalls++
+	f.stopCtxErr = ctx.Err()
 	return f.stopErr
 }
 
@@ -457,4 +461,108 @@ func TestManager_StartAll(t *testing.T) {
 		err := m.StartAll(ctx, map[string]map[string]interface{}{"postgresql": nil})
 		require.Error(t, err)
 	})
+}
+
+func TestManager_StartAll_RunsInParallel(t *testing.T) {
+	const delay = 200 * time.Millisecond
+	p1 := &fakePlugin{name: "postgresql", launchDelay: delay}
+	p2 := &fakePlugin{name: "kafka", launchDelay: delay}
+	m := NewManager(newRegistryWith(t, p1, p2), nil, fastOrchestration(true), nil)
+
+	start := time.Now()
+	require.NoError(t, m.StartAll(context.Background(), map[string]map[string]interface{}{
+		"postgresql": nil, "kafka": nil,
+	}))
+
+	assert.Less(t, time.Since(start), 2*delay, "services must start concurrently, not one after another")
+}
+
+func TestManager_Start_CancelledDuringReadiness(t *testing.T) {
+	p := &fakePlugin{name: "postgresql", readyResults: []readyResult{{ready: false}}}
+	orch := fastOrchestration(false)
+	orch.HealthCheckInterval = time.Hour
+	orch.CleanupOnFailure = false
+	m := NewManager(newRegistryWith(t, p), nil, orch, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	err := m.Start(ctx, "postgresql", nil)
+
+	require.Error(t, err)
+	assert.Equal(t, 1, p.stopCalls, "a cancelled start must stop what it launched, whatever cleanup-on-failure says")
+	assert.NoError(t, p.stopCtxErr, "teardown must not use the cancelled context")
+	assert.Empty(t, m.ListRunning())
+}
+
+func TestManager_Start_NotReadyWithoutCleanupStaysRecorded(t *testing.T) {
+	p := &fakePlugin{name: "postgresql", readyResults: []readyResult{{ready: false}}}
+	orch := fastOrchestration(false)
+	orch.CleanupOnFailure = false
+	m := NewManager(newRegistryWith(t, p), nil, orch, nil)
+
+	err := m.Start(context.Background(), "postgresql", nil)
+	require.Error(t, err)
+	assert.True(t, gtErrors.Is(err, gtErrors.ErrServiceNotReady))
+	assert.Zero(t, p.stopCalls, "kept for inspection")
+
+	status, err := m.GetStatus(context.Background(), "postgresql")
+	require.NoError(t, err)
+	assert.Equal(t, "error", status.Status)
+
+	require.NoError(t, m.StopAll(context.Background()))
+	assert.Equal(t, 1, p.stopCalls, "StopAll must still tear down the failed service")
+}
+
+func TestManager_StartAll_FailureCleansUpWithFreshContext(t *testing.T) {
+	ok := &fakePlugin{name: "kafka"}
+	bad := &fakePlugin{name: "postgresql", launchErr: errors.New("boom")}
+	m := NewManager(newRegistryWith(t, ok, bad), nil, fastOrchestration(true), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := m.StartAll(ctx, map[string]map[string]interface{}{"kafka": nil, "postgresql": nil})
+
+	require.Error(t, err)
+	assert.True(t, gtErrors.Is(err, gtErrors.ErrServiceFailed))
+	assert.Equal(t, 1, ok.stopCalls, "the started service is torn down")
+	assert.NoError(t, ok.stopCtxErr)
+	assert.Zero(t, bad.stopCalls, "a failed launch has nothing to stop")
+	assert.Empty(t, m.ListRunning())
+}
+
+func TestManager_GetStatus_Starting(t *testing.T) {
+	p := &fakePlugin{name: "postgresql", launchDelay: 100 * time.Millisecond}
+	m := NewManager(newRegistryWith(t, p), nil, fastOrchestration(false), nil)
+
+	done := make(chan error)
+	go func() { done <- m.Start(context.Background(), "postgresql", nil) }()
+	time.Sleep(30 * time.Millisecond)
+
+	status, err := m.GetStatus(context.Background(), "postgresql")
+	require.NoError(t, err)
+	assert.Equal(t, "starting", status.Status)
+	require.NoError(t, <-done)
+}
+
+func TestManager_Start_FailsFastWhenContainerExited(t *testing.T) {
+	p := &fakePlugin{name: "postgresql", readyResults: []readyResult{
+		{ready: false, err: gtErrors.Wrap(gtErrors.New(gtErrors.ErrContainerExited, "exited with code 1"),
+			gtErrors.ErrDockerFailed, "failed to check container status")},
+	}}
+	orch := fastOrchestration(false)
+	orch.HealthCheckRetries = 1000
+	orch.HealthCheckInterval = time.Second
+	m := NewManager(newRegistryWith(t, p), nil, orch, nil)
+
+	start := time.Now()
+	err := m.Start(context.Background(), "postgresql", nil)
+
+	require.Error(t, err)
+	assert.True(t, gtErrors.Is(err, gtErrors.ErrContainerExited))
+	assert.Less(t, time.Since(start), time.Second, "must not keep polling a dead container")
+	assert.Equal(t, 1, p.readyIdx)
 }

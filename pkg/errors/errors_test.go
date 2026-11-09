@@ -129,8 +129,8 @@ func TestGTError_WithContext(t *testing.T) {
 	assert.Equal(t, "couchbase", err.Context["service"])
 
 	// Add multiple context values
-	err.WithContext("port", 8091)
-	err.WithContext("timeout", "30s")
+	err = err.WithContext("port", 8091)
+	err = err.WithContext("timeout", "30s")
 
 	assert.Equal(t, 3, len(err.Context))
 	assert.Equal(t, 8091, err.Context["port"])
@@ -161,6 +161,36 @@ func TestIs(t *testing.T) {
 			err:      Wrap(errors.New("cause"), ErrTestFailed, "test failed"),
 			code:     ErrTestFailed,
 			expected: true,
+		},
+		{
+			name:     "code of a wrapped GTError",
+			err:      Wrap(New(ErrContainerForeign, "not ours"), ErrServiceFailed, "launch failed"),
+			code:     ErrContainerForeign,
+			expected: true,
+		},
+		{
+			name:     "code through fmt.Errorf %w",
+			err:      fmt.Errorf("context: %w", New(ErrServiceNotReady, "slow")),
+			code:     ErrServiceNotReady,
+			expected: true,
+		},
+		{
+			name:     "code inside errors.Join",
+			err:      errors.Join(errors.New("a"), New(ErrServiceNotReady, "slow")),
+			code:     ErrServiceNotReady,
+			expected: true,
+		},
+		{
+			name:     "code absent from the chain",
+			err:      Wrap(errors.Join(errors.New("a"), New(ErrConfigInvalid, "x")), ErrServiceFailed, "y"),
+			code:     ErrTestFailed,
+			expected: false,
+		},
+		{
+			name:     "typed nil GTError",
+			err:      (*GTError)(nil),
+			code:     ErrConfigInvalid,
+			expected: false,
 		},
 		{
 			name:     "non-GTError",
@@ -223,8 +253,8 @@ func ExampleWrap() {
 
 func ExampleGTError_WithContext() {
 	err := New(ErrServiceFailed, "service failed to start")
-	err.WithContext("service", "couchbase")
-	err.WithContext("port", 8091)
+	err = err.WithContext("service", "couchbase")
+	err = err.WithContext("port", 8091)
 
 	fmt.Printf("Code: %s, Message: %s, Service: %s\n",
 		err.Code, err.Message, err.Context["service"])
@@ -251,6 +281,6 @@ func BenchmarkWithContext(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		err.WithContext("iteration", i)
+		_ = err.WithContext("iteration", i)
 	}
 }

@@ -24,6 +24,9 @@ public class ConsumeOrderedMessagesDebug implements PubSubOperation {
     private final Logger logger = LoggerFactory.getLogger(ConsumeOrderedMessagesDebug.class);
 
     public String execute(PubSubData pubSubData) throws JsonProcessingException {
+        if (pubSubData.orderingKey == null || pubSubData.orderingKey.isEmpty()) {
+            throw new IllegalArgumentException("orderingKey is required to consume ordered messages");
+        }
         String subscriptionName = ProjectSubscriptionName.format(pubSubData.projectId, pubSubData.subscriptionId);
 
         int numberMessages = Optional.ofNullable(pubSubData.maxRequestedMessages).orElse(MAX_REQUESTED_MESSAGES);
@@ -48,7 +51,8 @@ public class ConsumeOrderedMessagesDebug implements PubSubOperation {
         messages.stream()
                 .forEach(message -> {
 
-                    logger.info("New message was found! \n{}\n****************************************************");
+                    logger.info("New message was found! \n{}\n****************************************************",
+                            message.getMessage().getData().toStringUtf8());
 
                     if (pubSubData.orderingKey.equals(message.getMessage().getOrderingKey())) {
                         logger.info(" Group ordered message for acknowledgement is {}", message.getMessage().getData().toStringUtf8());

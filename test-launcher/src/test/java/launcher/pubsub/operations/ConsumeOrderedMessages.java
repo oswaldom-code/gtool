@@ -24,6 +24,9 @@ public class ConsumeOrderedMessages implements PubSubOperation {
     private final Logger logger = LoggerFactory.getLogger(ConsumeOrderedMessages.class);
 
     public String execute(PubSubData pubSubData) throws JsonProcessingException {
+        if (pubSubData.orderingKey == null || pubSubData.orderingKey.isEmpty()) {
+            throw new IllegalArgumentException("orderingKey is required to consume ordered messages");
+        }
         String subscriptionName = ProjectSubscriptionName.format(pubSubData.projectId, pubSubData.subscriptionId);
 
         int numberMessages = Optional.ofNullable(pubSubData.maxRequestedMessages).orElse(MAX_REQUESTED_MESSAGES);

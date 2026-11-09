@@ -1,6 +1,8 @@
 package mongodb
 
 import (
+	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -173,10 +175,12 @@ func TestGetConnectionInfo(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, got)
 			assert.Equal(t, "localhost", got.Host)
-			assert.Equal(t, mustParsePort(tt.config.Port), got.Port)
+			wantPort, err := strconv.Atoi(tt.config.Port)
+			require.NoError(t, err)
+			assert.Equal(t, wantPort, got.Port)
 			assert.Equal(t, "mongodb", got.Protocol)
 			assert.Equal(t, tt.config.Database, got.Metadata["database"])
-			assert.Equal(t, "mongodb://localhost:"+tt.config.Port, got.Metadata["connectionString"])
+			assert.Equal(t, "mongodb://localhost:"+tt.config.Port, got.Metadata["connection-string"])
 		})
 	}
 }
@@ -216,7 +220,7 @@ func TestIsReady_NotStarted(t *testing.T) {
 	plugin := NewMongoDBPlugin(nil, nil)
 
 	// Should return error when container not started
-	ready, err := plugin.IsReady(nil)
+	ready, err := plugin.IsReady(context.TODO())
 	assert.False(t, ready)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not started")
@@ -226,6 +230,6 @@ func TestStop_NoContainer(t *testing.T) {
 	plugin := NewMongoDBPlugin(nil, zap.NewNop())
 
 	// Should not error when no container to stop
-	err := plugin.Stop(nil)
+	err := plugin.Stop(context.TODO())
 	assert.NoError(t, err)
 }

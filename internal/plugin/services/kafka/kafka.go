@@ -31,6 +31,20 @@ const (
 	kafkaTopicsBin = "/opt/kafka/bin/kafka-topics.sh"
 )
 
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "port", "docker-port", "partitions", "topics", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"port":        defaultPort,
+		"docker-port": dockerListenerPort,
+	}
+}
+
 // KafkaPlugin implements the ServicePlugin interface for a single-node Kafka
 // broker running in KRaft mode.
 type KafkaPlugin struct {
@@ -77,9 +91,9 @@ func (p *KafkaPlugin) Launch(ctx context.Context, config map[string]interface{})
 	}
 	p.config = cfg
 
-	p.logger.Info("pulling Kafka image", zap.String("image", cfg.Image))
-	if err := p.docker.PullImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull Kafka image")
+	p.logger.Info("ensuring Kafka image", zap.String("image", cfg.Image))
+	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get Kafka image")
 	}
 
 	containerConfig := &docker.ContainerConfig{
@@ -100,16 +114,11 @@ func (p *KafkaPlugin) Launch(ctx context.Context, config map[string]interface{})
 		zap.String("name", cfg.ContainerName),
 		zap.String("port", cfg.Port))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create Kafka container")
-	}
-	p.containerID = containerID
-
-	p.logger.Info("starting Kafka container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start Kafka container")
 	}
+	p.containerID = containerID
 
 	p.logger.Info("waiting for Kafka to be ready")
 	if err := p.waitForReady(ctx); err != nil {
@@ -122,10 +131,8 @@ func (p *KafkaPlugin) Launch(ctx context.Context, config map[string]interface{})
 	if len(cfg.Topics) > 0 {
 		p.logger.Info("creating topics", zap.Strings("topics", cfg.Topics))
 		if err := p.createTopics(ctx, cfg.Topics, cfg.Partitions); err != nil {
-			// Don't fail the launch if topic creation fails, just log the error
-			p.logger.Error("failed to create topics",
-				zap.Error(err),
-				zap.Strings("topics", cfg.Topics))
+			_ = p.Stop(context.Background())
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to create Kafka topics")
 		}
 	}
 
@@ -190,6 +197,7 @@ func (p *KafkaPlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found Kafka container",
@@ -198,10 +206,13 @@ func (p *KafkaPlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -223,6 +234,7 @@ func (p *KafkaPlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("Kafka service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -309,9 +321,7 @@ func (p *KafkaPlugin) parseConfig(config map[string]interface{}) (*KafkaConfig, 
 		ContainerName: fmt.Sprintf("%s-%d", containerNamePrefix, time.Now().Unix()),
 	}
 
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
 	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
 	cfg.DockerPort = svcconfig.Port(config, "docker-port", cfg.DockerPort)
 	if partitions, ok := config["partitions"].(float64); ok && partitions > 0 {
@@ -319,16 +329,8 @@ func (p *KafkaPlugin) parseConfig(config map[string]interface{}) (*KafkaConfig, 
 	} else if partitions, ok := config["partitions"].(int); ok && partitions > 0 {
 		cfg.Partitions = partitions
 	}
-	if topics, ok := config["topics"].([]interface{}); ok {
-		for _, t := range topics {
-			if name, ok := t.(string); ok && name != "" {
-				cfg.Topics = append(cfg.Topics, name)
-			}
-		}
-	}
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
-	}
+	cfg.Topics = append(cfg.Topics, svcconfig.Strings(config, "topics")...)
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
 
 	return cfg, nil
 }
@@ -363,6 +365,9 @@ func (p *KafkaPlugin) waitForReady(ctx context.Context) error {
 	for i := 0; i < maxRetries; i++ {
 		ready, err := p.IsReady(ctx)
 		if err != nil {
+			if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+				return err
+			}
 			p.logger.Debug("error checking readiness",
 				zap.Error(err),
 				zap.Int("attempt", i+1))

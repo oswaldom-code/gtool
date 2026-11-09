@@ -29,3 +29,20 @@ func TestPort(t *testing.T) {
 		})
 	}
 }
+
+func TestString(t *testing.T) {
+	cfg := map[string]interface{}{"password": 123456, "project": float64(987), "name": "x", "empty": "", "bad": []int{1}}
+	assert.Equal(t, "123456", String(cfg, "password", "default"), "unquoted YAML numbers are values, not ignored")
+	assert.Equal(t, "987", String(cfg, "project", ""))
+	assert.Equal(t, "x", String(cfg, "name", ""))
+	assert.Equal(t, "default", String(cfg, "empty", "default"))
+	assert.Equal(t, "default", String(cfg, "bad", "default"))
+	assert.Equal(t, "default", String(cfg, "missing", "default"))
+}
+
+func TestStrings(t *testing.T) {
+	cfg := map[string]interface{}{"topics": []interface{}{"orders", 42, "", true, float64(7)}, "notalist": "x"}
+	assert.Equal(t, []string{"orders", "42", "7"}, Strings(cfg, "topics"))
+	assert.Nil(t, Strings(cfg, "notalist"))
+	assert.Nil(t, Strings(cfg, "missing"))
+}

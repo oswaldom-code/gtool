@@ -74,11 +74,7 @@ func TestGolangLauncher_IsReady_NoPort(t *testing.T) {
 }
 
 func TestHTTPProbe_NoServer(t *testing.T) {
-	// A port with nothing listening must probe as not ready.
-	ln, err := net.Listen("tcp", "localhost:0")
-	require.NoError(t, err)
-	port := ln.Addr().(*net.TCPAddr).Port
-	require.NoError(t, ln.Close())
-
-	assert.False(t, httpProbe(port))
+	// Port 1 (tcpmux) has nothing listening on a dev or CI host, so the probe
+	// is refused deterministically instead of racing for a freed ephemeral port.
+	assert.False(t, httpProbe(1))
 }

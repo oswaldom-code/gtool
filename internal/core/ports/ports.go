@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/oswaldom-code/gtool/internal/plugin/services"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/svcconfig"
 	"github.com/oswaldom-code/gtool/pkg/config"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
@@ -96,12 +97,20 @@ func Allocate(cfg *config.Config, alloc Allocator) error {
 		}
 	}
 
-	if isAuto(cfg.AppConfig.HostPort) {
+	hp := strings.TrimSpace(cfg.AppConfig.HostPort)
+	switch {
+	case hp == "":
+	case isAuto(hp):
 		port, err := alloc()
 		if err != nil {
 			return err
 		}
 		cfg.AppConfig.HostPort = strconv.Itoa(port)
+	default:
+		if n, err := strconv.Atoi(hp); err != nil || n < 1 || n > 65535 {
+			return gtErrors.New(gtErrors.ErrConfigInvalid,
+				fmt.Sprintf("app-config.host-port must be %q or a port between 1 and 65535, got %q", Auto, cfg.AppConfig.HostPort))
+		}
 	}
 	return nil
 }
@@ -116,9 +125,16 @@ func AppHostPort(cfg *config.Config) int {
 }
 
 // Values returns the placeholder table of the run: "mocks.<svc>.<port-key>"
-// for every configured mock port, plus "app.port" and "app.host-port".
+// for every port of every enabled mock (its default when not configured), plus
+// "app.port" and "app.host-port".
 func Values(cfg *config.Config) map[string]string {
 	values := map[string]string{}
+	defaults := services.DefaultPorts()
+	for _, svc := range cfg.ThirdParty.Mocks {
+		for key, port := range defaults[svc] {
+			values["mocks."+svc+"."+key] = port
+		}
+	}
 	for svc, raw := range cfg.ThirdParty.MockConfig {
 		svcCfg, ok := raw.(map[string]interface{})
 		if !ok {
@@ -135,9 +151,7 @@ func Values(cfg *config.Config) map[string]string {
 	}
 	if cfg.AppConfig.Port > 0 {
 		values["app.port"] = strconv.Itoa(cfg.AppConfig.Port)
-	}
-	if hp := AppHostPort(cfg); hp > 0 {
-		values["app.host-port"] = strconv.Itoa(hp)
+		values["app.host-port"] = strconv.Itoa(AppHostPort(cfg))
 	}
 	return values
 }
@@ -162,8 +176,8 @@ func Interpolate(cfg *config.Config, values map[string]string) error {
 	}
 	if len(missing) > 0 {
 		return gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf(
-			"unresolved placeholders: %s; set the referenced port explicitly in the config (a number or %q)",
-			strings.Join(missing, ", "), Auto))
+			"unresolved placeholders: %s; they must reference a port of a mock listed in third-party.mocks, or app.port / app.host-port",
+			strings.Join(missing, ", ")))
 	}
 	return nil
 }

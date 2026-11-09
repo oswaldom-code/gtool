@@ -4,19 +4,22 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/oswaldom-code/gtool/internal/core/ports"
+	"github.com/oswaldom-code/gtool/internal/plugin/services"
+	"github.com/oswaldom-code/gtool/internal/plugin/services/svcconfig"
 	"github.com/oswaldom-code/gtool/pkg/config"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 var (
 	supportedVersions     = []string{"v1"}
-	supportedTechnologies = []string{"golang", "nodejs", "generic"}
-	supportedLaunchers    = []string{"test-launcher-back", "test-launcher-front"}
-	supportedMocks        = []string{"mountebank", "couchbase", "postgresql", "kafka", "pubsub", "gcs", "redis", "mongodb", "mysql", "minio", "floci"}
+	supportedTechnologies = []string{"golang", "generic"}
+	supportedLaunchers    = []string{"test-launcher-back"}
+	supportedMocks        = services.Names()
 	supportedHTTPMethods  = []string{
 		http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
 		http.MethodPatch, http.MethodDelete, http.MethodOptions,
@@ -33,35 +36,44 @@ func NewValidator() *Validator {
 	}
 }
 
+// messageOf returns the bare message of a validation error, so the aggregated
+// report lists each problem once without repeating the error code.
+func messageOf(err error) string {
+	if gtErr, ok := err.(*gtErrors.GTError); ok {
+		return gtErr.Message
+	}
+	return err.Error()
+}
+
 func (v *Validator) Validate(cfg *config.Config) error {
 	var errors []string
 
 	if err := v.validateVersion(cfg); err != nil {
-		errors = append(errors, err.Error())
+		errors = append(errors, messageOf(err))
 	}
 
 	if err := v.validateAppTechnology(cfg); err != nil {
-		errors = append(errors, err.Error())
+		errors = append(errors, messageOf(err))
 	}
 
 	if err := v.validateTestLauncher(cfg); err != nil {
-		errors = append(errors, err.Error())
+		errors = append(errors, messageOf(err))
 	}
 
 	if err := v.validateAppConfig(cfg); err != nil {
-		errors = append(errors, err.Error())
+		errors = append(errors, messageOf(err))
 	}
 
 	if err := v.validateTestConfig(cfg); err != nil {
-		errors = append(errors, err.Error())
+		errors = append(errors, messageOf(err))
 	}
 
 	if err := v.validateMockServices(cfg); err != nil {
-		errors = append(errors, err.Error())
+		errors = append(errors, messageOf(err))
 	}
 
 	if err := v.validateOrchestration(cfg); err != nil {
-		errors = append(errors, err.Error())
+		errors = append(errors, messageOf(err))
 	}
 
 	if cfg.StressConfig != nil {
@@ -78,11 +90,11 @@ func (v *Validator) Validate(cfg *config.Config) error {
 
 func (v *Validator) validateVersion(cfg *config.Config) error {
 	if cfg.Version == "" {
-		return fmt.Errorf("version is required")
+		return gtErrors.New(gtErrors.ErrConfigInvalid, "version is required")
 	}
 
 	if !contains(supportedVersions, cfg.Version) {
-		return fmt.Errorf("unsupported version '%s'. Supported: %v", cfg.Version, supportedVersions)
+		return gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf("unsupported version '%s'. Supported: %v", cfg.Version, supportedVersions))
 	}
 
 	return nil
@@ -90,11 +102,11 @@ func (v *Validator) validateVersion(cfg *config.Config) error {
 
 func (v *Validator) validateAppTechnology(cfg *config.Config) error {
 	if cfg.AppTechnology == "" {
-		return fmt.Errorf("app-technology is required")
+		return gtErrors.New(gtErrors.ErrConfigInvalid, "app-technology is required")
 	}
 
 	if !contains(supportedTechnologies, cfg.AppTechnology) {
-		return fmt.Errorf("unsupported app-technology '%s'. Supported: %v", cfg.AppTechnology, supportedTechnologies)
+		return gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf("unsupported app-technology '%s'. Supported: %v", cfg.AppTechnology, supportedTechnologies))
 	}
 
 	return nil
@@ -102,11 +114,11 @@ func (v *Validator) validateAppTechnology(cfg *config.Config) error {
 
 func (v *Validator) validateTestLauncher(cfg *config.Config) error {
 	if cfg.TestLauncher == "" {
-		return fmt.Errorf("test-launcher is required")
+		return gtErrors.New(gtErrors.ErrConfigInvalid, "test-launcher is required")
 	}
 
 	if !contains(supportedLaunchers, cfg.TestLauncher) {
-		return fmt.Errorf("unsupported test-launcher '%s'. Supported: %v", cfg.TestLauncher, supportedLaunchers)
+		return gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf("unsupported test-launcher '%s'. Supported: %v", cfg.TestLauncher, supportedLaunchers))
 	}
 
 	return nil
@@ -115,21 +127,21 @@ func (v *Validator) validateTestLauncher(cfg *config.Config) error {
 func (v *Validator) validateAppConfig(cfg *config.Config) error {
 	appCfg := cfg.AppConfig
 
-	if appCfg.DockerImage == "" {
-		if cfg.AppTechnology == "golang" {
-			if appCfg.BinaryName == "" {
-				return fmt.Errorf("app-config.binary-name is required for golang technology")
-			}
-		}
+	if appCfg.Port < 0 || appCfg.Port > 65535 {
+		return gtErrors.New(gtErrors.ErrConfigInvalid, "app-config.port must be between 0 and 65535")
 	}
 
-	if appCfg.Port < 0 || appCfg.Port > 65535 {
-		return fmt.Errorf("app-config.port must be between 0 and 65535")
+	if appCfg.HealthPath != "" && !strings.HasPrefix(appCfg.HealthPath, "/") {
+		return gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf("app-config.health-path must start with '/', got '%s'", appCfg.HealthPath))
+	}
+
+	if strings.TrimSpace(appCfg.HostPort) != "" && appCfg.Port <= 0 {
+		return gtErrors.New(gtErrors.ErrConfigInvalid, "app-config.host-port requires app-config.port (the port the app listens on)")
 	}
 
 	if hp := strings.TrimSpace(appCfg.HostPort); hp != "" && !strings.EqualFold(hp, ports.Auto) {
 		if n, err := strconv.Atoi(hp); err != nil || n < 1 || n > 65535 {
-			return fmt.Errorf("app-config.host-port must be \"auto\" or a port between 1 and 65535, got '%s'", appCfg.HostPort)
+			return gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf("app-config.host-port must be \"auto\" or a port between 1 and 65535, got '%s'", appCfg.HostPort))
 		}
 	}
 
@@ -142,7 +154,7 @@ func (v *Validator) validateTestConfig(cfg *config.Config) error {
 	if v.checkPaths {
 		if testCfg.FeaturesPath != "" {
 			if _, err := os.Stat(testCfg.FeaturesPath); os.IsNotExist(err) {
-				return fmt.Errorf("test-config.features-path does not exist: %s", testCfg.FeaturesPath)
+				return gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf("test-config.features-path does not exist: %s", testCfg.FeaturesPath))
 			}
 		}
 	}
@@ -150,15 +162,65 @@ func (v *Validator) validateTestConfig(cfg *config.Config) error {
 	return nil
 }
 
+func isPortKey(key string) bool {
+	return key == "port" || strings.HasSuffix(key, "-port")
+}
+
+// validateMockConfig rejects unknown keys (usually typos the plugin would
+// silently ignore), invalid port values and two port keys of one mock bound
+// to the same explicit host port.
+func validateMockConfig(name string, mockCfg map[string]interface{}) []string {
+	var errs []string
+	accepted := services.ConfigKeys()[name]
+	seenPorts := map[string]string{}
+	keys := make([]string, 0, len(mockCfg))
+	for key := range mockCfg {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		if !contains(accepted, key) {
+			errs = append(errs, fmt.Sprintf("third-party.mock-config.%s: unknown key '%s'. Accepted: %v", name, key, accepted))
+			continue
+		}
+		if !isPortKey(key) {
+			continue
+		}
+		value := svcconfig.Port(mockCfg, key, "")
+		if strings.EqualFold(value, ports.Auto) {
+			continue
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > 65535 {
+			errs = append(errs, fmt.Sprintf("third-party.mock-config.%s.%s must be %q or a port between 1 and 65535, got '%v'",
+				name, key, ports.Auto, mockCfg[key]))
+			continue
+		}
+		if other, dup := seenPorts[value]; dup {
+			errs = append(errs, fmt.Sprintf("third-party.mock-config.%s: %s and %s both use host port %s", name, other, key, value))
+		}
+		seenPorts[value] = key
+	}
+	return errs
+}
+
 func (v *Validator) validateMockServices(cfg *config.Config) error {
 	for _, mock := range cfg.ThirdParty.Mocks {
 		if !contains(supportedMocks, mock) {
-			return fmt.Errorf("unsupported mock service '%s'. Supported: %v", mock, supportedMocks)
+			return gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf("unsupported mock service '%s'. Supported: %v", mock, supportedMocks))
 		}
 	}
 
-	// Validate mock-specific configurations
-
+	var errs []string
+	for _, mock := range cfg.ThirdParty.Mocks {
+		if mockCfg, ok := cfg.ThirdParty.MockConfig[mock].(map[string]interface{}); ok {
+			errs = append(errs, validateMockConfig(mock, mockCfg)...)
+		}
+	}
+	if len(errs) > 0 {
+		return gtErrors.New(gtErrors.ErrConfigInvalid, strings.Join(errs, "\n  - "))
+	}
 	return nil
 }
 
@@ -166,15 +228,15 @@ func (v *Validator) validateOrchestration(cfg *config.Config) error {
 	orch := cfg.Orchestration
 
 	if orch.StartupTimeout <= 0 {
-		return fmt.Errorf("orchestration.startup-timeout must be positive")
+		return gtErrors.New(gtErrors.ErrConfigInvalid, "orchestration.startup-timeout must be positive")
 	}
 
 	if orch.HealthCheckInterval <= 0 {
-		return fmt.Errorf("orchestration.health-check-interval must be positive")
+		return gtErrors.New(gtErrors.ErrConfigInvalid, "orchestration.health-check-interval must be positive")
 	}
 
 	if orch.HealthCheckRetries <= 0 {
-		return fmt.Errorf("orchestration.health-check-retries must be positive")
+		return gtErrors.New(gtErrors.ErrConfigInvalid, "orchestration.health-check-retries must be positive")
 	}
 
 	return nil

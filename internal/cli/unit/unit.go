@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/oswaldom-code/gtool/internal/infra/termout"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
@@ -123,19 +125,25 @@ func buildMocks(gobin string, mocks []mockSpec) error {
 	if err := installTool(gobin, mockgenURL); err != nil {
 		return err
 	}
-	if err := runStreaming("", nil, "go", "mod", "download"); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrInvalidArgument, "go mod download failed")
-	}
 
-	gopath, err := goEnv("GOPATH")
-	if err != nil {
-		return err
+	var modCache string
+	var modules map[string]string
+	if usesWildcards(mocks) {
+		if err := runStreaming("", nil, "go", "mod", "download"); err != nil {
+			return gtErrors.Wrap(err, gtErrors.ErrInvalidArgument, "go mod download failed")
+		}
+		var err error
+		if modCache, err = goEnv("GOMODCACHE"); err != nil {
+			return err
+		}
+		if modules, err = listModules(); err != nil {
+			return err
+		}
 	}
-	modCache := filepath.Join(gopath, "pkg", "mod")
 
 	mockgen := filepath.Join(gobin, "mockgen")
 	for _, m := range mocks {
-		source, err := resolveSource(m.Source, modCache)
+		source, err := resolveSource(m.Source, modCache, modules)
 		if err != nil {
 			return err
 		}
@@ -154,9 +162,55 @@ func buildMocks(gobin string, mocks []mockSpec) error {
 	return nil
 }
 
+func usesWildcards(mocks []mockSpec) bool {
+	for _, m := range mocks {
+		if strings.Contains(m.Source, "<") {
+			return true
+		}
+	}
+	return false
+}
+
+// listModules returns the directory of every module in the build list, as the
+// go command resolves it (replace directives, case escaping, GOMODCACHE).
+var listModules = func() (map[string]string, error) {
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Path}} {{.Dir}}", "all").Output()
+	if err != nil {
+		return nil, gtErrors.Wrap(err, gtErrors.ErrInvalidArgument, "failed to list Go modules")
+	}
+	modules := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		path, dir, _ := strings.Cut(line, " ")
+		if path != "" {
+			modules[path] = dir
+		}
+	}
+	return modules, nil
+}
+
+// moduleDir returns the directory of the module whose path is name or ends
+// with "/"+name, so search-lib never matches search-lib-v2.
+func moduleDir(name string, modules map[string]string) (string, error) {
+	paths := make([]string, 0, len(modules))
+	for path := range modules {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if path != name && !strings.HasSuffix(path, "/"+name) {
+			continue
+		}
+		if modules[path] == "" {
+			return "", gtErrors.New(gtErrors.ErrInvalidArgument, fmt.Sprintf("module %s is not downloaded", path))
+		}
+		return modules[path], nil
+	}
+	return "", gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf("module %q not found in the build list", name))
+}
+
 // resolveSource expands library wildcards in a mock source path to an absolute
 // path inside the Go module cache, mirroring legacy-tool's wildcard handling.
-func resolveSource(source, modCache string) (string, error) {
+func resolveSource(source, modCache string, modules map[string]string) (string, error) {
 	if strings.Contains(source, "<LIB-ROOT>") {
 		source = strings.ReplaceAll(source, "<LIB-ROOT>", modCache)
 	}
@@ -165,37 +219,14 @@ func resolveSource(source, modCache string) (string, error) {
 		if !strings.Contains(source, wildcard) {
 			continue
 		}
-		modPath, err := moduleCachePath(module, modCache)
+		dir, err := moduleDir(module, modules)
 		if err != nil {
 			return "", err
 		}
-		source = strings.ReplaceAll(source, wildcard, modPath)
+		source = strings.ReplaceAll(source, wildcard, dir)
 	}
 
 	return source, nil
-}
-
-// moduleCachePath finds the first go.mod require line containing the given
-// module substring and returns its "<module>@<version>" path in the cache.
-func moduleCachePath(moduleSubstr, modCache string) (string, error) {
-	data, err := os.ReadFile("go.mod")
-	if err != nil {
-		return "", gtErrors.Wrap(err, gtErrors.ErrConfigNotFound, "failed to read go.mod")
-	}
-
-	for _, line := range strings.Split(string(data), "\n") {
-		if !strings.Contains(line, moduleSubstr) {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 || strings.HasPrefix(fields[0], "//") {
-			continue
-		}
-		return filepath.Join(modCache, fields[0]+"@"+fields[1]), nil
-	}
-
-	return "", gtErrors.New(gtErrors.ErrConfigInvalid,
-		fmt.Sprintf("module %q not found in go.mod", moduleSubstr))
 }
 
 // execUnitTests reproduces legacy-tool's exec_unit_tests Ginkgo invocation.
@@ -224,7 +255,7 @@ func execUnitTests(gobin string) error {
 		return gtErrors.Wrap(err, gtErrors.ErrTestFailed, "unit tests failed")
 	}
 
-	fmt.Printf("\n✅ Unit tests passed. Coverage and report under ./%s\n", coverFolder)
+	termout.Printf("\n✅ Unit tests passed. Coverage and report under ./%s\n", coverFolder)
 	return nil
 }
 
@@ -261,7 +292,7 @@ func goBin() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(gopath, "bin"), nil
+	return filepath.Join(filepath.SplitList(gopath)[0], "bin"), nil
 }
 
 func goEnv(key string) (string, error) {

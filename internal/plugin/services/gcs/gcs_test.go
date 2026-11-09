@@ -46,7 +46,7 @@ func TestParseConfig(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "14443", got.Port)
 		assert.Equal(t, "my-project", got.ProjectID)
-		assert.Equal(t, []string{"uploads", "exports"}, got.Buckets)
+		assert.Equal(t, []string{"uploads", "42", "exports"}, got.Buckets)
 	})
 
 	t.Run("custom container name", func(t *testing.T) {

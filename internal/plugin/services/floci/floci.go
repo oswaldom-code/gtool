@@ -24,6 +24,19 @@ const (
 	containerNamePrefix = "gtool-floci"
 )
 
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "port", "region", "buckets", "queues", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"port": defaultPort,
+	}
+}
+
 // FlociPlugin implements the ServicePlugin interface for Floci, a local AWS
 // emulator serving S3, SQS and other AWS APIs on a single port.
 type FlociPlugin struct {
@@ -72,9 +85,9 @@ func (p *FlociPlugin) Launch(ctx context.Context, config map[string]interface{})
 	}
 	p.config = cfg
 
-	p.logger.Info("pulling Floci image", zap.String("image", cfg.Image))
+	p.logger.Info("ensuring Floci image", zap.String("image", cfg.Image))
 	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull Floci image")
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get Floci image")
 	}
 
 	containerConfig := &docker.ContainerConfig{
@@ -94,16 +107,11 @@ func (p *FlociPlugin) Launch(ctx context.Context, config map[string]interface{})
 		zap.String("name", cfg.ContainerName),
 		zap.String("port", cfg.Port))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create Floci container")
-	}
-	p.containerID = containerID
-
-	p.logger.Info("starting Floci container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start Floci container")
 	}
+	p.containerID = containerID
 
 	p.logger.Info("waiting for Floci emulator to be ready")
 	if err := p.waitForReady(ctx); err != nil {
@@ -178,6 +186,7 @@ func (p *FlociPlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found Floci container",
@@ -186,10 +195,13 @@ func (p *FlociPlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -211,6 +223,7 @@ func (p *FlociPlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("Floci service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -289,18 +302,6 @@ func (p *FlociPlugin) GetLogs(ctx context.Context, opts *plugin.LogOptions) ([]s
 	return lines, nil
 }
 
-// stringList extracts the non-empty strings of a YAML/JSON list value
-func stringList(value interface{}) []string {
-	var out []string
-	items, _ := value.([]interface{})
-	for _, item := range items {
-		if s, ok := item.(string); ok && s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 // parseConfig parses the configuration map into FlociConfig
 func (p *FlociPlugin) parseConfig(config map[string]interface{}) (*FlociConfig, error) {
 	cfg := &FlociConfig{
@@ -310,18 +311,12 @@ func (p *FlociPlugin) parseConfig(config map[string]interface{}) (*FlociConfig, 
 		ContainerName: fmt.Sprintf("%s-%d", containerNamePrefix, time.Now().Unix()),
 	}
 
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
 	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
-	if region, ok := config["region"].(string); ok && region != "" {
-		cfg.Region = region
-	}
-	cfg.Buckets = stringList(config["buckets"])
-	cfg.Queues = stringList(config["queues"])
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
-	}
+	cfg.Region = svcconfig.String(config, "region", cfg.Region)
+	cfg.Buckets = svcconfig.Strings(config, "buckets")
+	cfg.Queues = svcconfig.Strings(config, "queues")
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
 
 	return cfg, nil
 }
@@ -334,6 +329,9 @@ func (p *FlociPlugin) waitForReady(ctx context.Context) error {
 	for i := 0; i < maxRetries; i++ {
 		ready, err := p.IsReady(ctx)
 		if err != nil {
+			if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+				return err
+			}
 			p.logger.Debug("error checking readiness",
 				zap.Error(err),
 				zap.Int("attempt", i+1))

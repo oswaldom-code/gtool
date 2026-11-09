@@ -72,6 +72,16 @@ func (p *Process) markDone(err error) {
 	close(p.doneCh)
 }
 
+// signalGroup sends sig to the process group led by pid, so children started
+// by the process (e.g. by a shell wrapper) stop with it instead of being
+// orphaned. Each managed process leads its own group (Setpgid).
+func signalGroup(pid int, sig syscall.Signal) error {
+	if err := syscall.Kill(-pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return err
+	}
+	return nil
+}
+
 // Manager starts and tracks native OS processes.
 type Manager struct {
 	logger *zap.Logger
@@ -106,6 +116,8 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (*Process, error
 	cmd.Stdout = out
 	cmd.Stderr = out
 	cmd.WaitDelay = outputWaitDelay
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return signalGroup(cmd.Process.Pid, syscall.SIGKILL) }
 
 	if err := cmd.Start(); err != nil {
 		return nil, gtErrors.Wrap(err, gtErrors.ErrProcessFailed, "failed to start process")
@@ -149,7 +161,7 @@ func (m *Manager) Stop(pid int, timeout time.Duration) error {
 		return nil
 	}
 
-	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	if err := signalGroup(pid, syscall.SIGTERM); err != nil {
 		// Process may have just exited; fall through to wait/kill.
 		m.logger.Debug("failed to send SIGTERM", zap.Int("pid", pid), zap.Error(err))
 	}
@@ -159,7 +171,7 @@ func (m *Manager) Stop(pid int, timeout time.Duration) error {
 		return nil
 	case <-time.After(timeout):
 		m.logger.Warn("process did not stop, sending SIGKILL", zap.Int("pid", pid))
-		if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		if err := signalGroup(pid, syscall.SIGKILL); err != nil {
 			return gtErrors.Wrap(err, gtErrors.ErrProcessFailed, "failed to kill process")
 		}
 		<-p.doneCh
@@ -178,7 +190,7 @@ func (m *Manager) Kill(pid int) error {
 		return nil
 	}
 
-	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := signalGroup(pid, syscall.SIGKILL); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrProcessFailed, "failed to kill process")
 	}
 	<-p.doneCh

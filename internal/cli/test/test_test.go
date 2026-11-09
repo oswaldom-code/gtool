@@ -46,8 +46,50 @@ func TestNewTestCmd(t *testing.T) {
 	assert.NotNil(t, cmd.RunE)
 }
 
-func TestRunTest_Success(t *testing.T) {
+// useValidConfig points cfgFile at a minimal config that passes validation.
+func useValidConfig(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "component-config.yml")
+	require.NoError(t, os.WriteFile(path, []byte("version: v1\n"+
+		"app-technology: generic\n"+
+		"test-launcher: test-launcher-back\n"), 0o600))
+	cfgFile = &path
+	t.Cleanup(func() { cfgFile = nil })
+}
+
+func TestRunTest_NoConfigFails(t *testing.T) {
 	cfgFile = nil
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	fp := &fakePipeline{}
+	injectPipeline(t, fp)
+
+	err = runTest(nil, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no configuration file found")
+	assert.False(t, fp.called, "a missing config must never run (and pass) an empty pipeline")
+}
+
+func TestRunTest_InvalidConfigFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "component-config.yml")
+	require.NoError(t, os.WriteFile(path, []byte("version: v9\n"), 0o600))
+	cfgFile = &path
+	fp := &fakePipeline{}
+	injectPipeline(t, fp)
+
+	err := runTest(nil, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ERR_CONFIG_INVALID")
+	assert.False(t, fp.called)
+}
+
+func TestRunTest_Success(t *testing.T) {
+	useValidConfig(t)
 	fp := &fakePipeline{result: &orchestrator.Result{
 		MocksStarted: true,
 		AppStarted:   true,
@@ -60,7 +102,7 @@ func TestRunTest_Success(t *testing.T) {
 }
 
 func TestRunTest_PipelineFailure(t *testing.T) {
-	cfgFile = nil
+	useValidConfig(t)
 	injectPipeline(t, &fakePipeline{
 		result: &orchestrator.Result{MocksStarted: true},
 		err:    errors.New("boom"),
@@ -72,7 +114,7 @@ func TestRunTest_PipelineFailure(t *testing.T) {
 }
 
 func TestRunTest_FactoryFailure(t *testing.T) {
-	cfgFile = nil
+	useValidConfig(t)
 	orig := newPipeline
 	t.Cleanup(func() { newPipeline = orig })
 	newPipeline = func(_ *config.Config, _ *zap.Logger) (*pipelineDeps, error) {
@@ -141,4 +183,36 @@ func TestRunTest_UnresolvedPlaceholder(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to resolve ports")
 	assert.False(t, fp.called, "no phase may start with an unresolved address")
+}
+
+func TestRunTest_StableOnlyFlagsNeedStable(t *testing.T) {
+	cmd := NewTestCmd(nil)
+	useValidConfig(t)
+	t.Cleanup(func() { stableMode, stableNoOpen = false, false })
+	require.NoError(t, cmd.Flags().Set("no-open", "true"))
+	fp := &fakePipeline{}
+	injectPipeline(t, fp)
+
+	err := runTest(cmd, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--no-open only applies with --stable")
+	assert.False(t, fp.called)
+}
+
+func TestRunTest_TagsOverrideConfig(t *testing.T) {
+	cmd := NewTestCmd(nil)
+	useValidConfig(t)
+	t.Cleanup(func() { stableTags = "" })
+	require.NoError(t, cmd.Flags().Set("tags", "@smoke"))
+	var got *config.Config
+	orig := newPipeline
+	t.Cleanup(func() { newPipeline = orig })
+	newPipeline = func(cfg *config.Config, _ *zap.Logger) (*pipelineDeps, error) {
+		got = cfg
+		return &pipelineDeps{pipeline: &fakePipeline{result: &orchestrator.Result{}}, close: func() error { return nil }}, nil
+	}
+
+	require.NoError(t, runTest(cmd, nil))
+	assert.Equal(t, "@smoke", got.TestConfig.Tags)
 }

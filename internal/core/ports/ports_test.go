@@ -218,3 +218,49 @@ func TestNoAuto(t *testing.T) {
 	assert.True(t, gtErrors.Is(err, gtErrors.ErrConfigInvalid))
 	assert.Contains(t, err.Error(), "gtool test")
 }
+
+func TestValues_UsesPluginDefaultsForEnabledMocks(t *testing.T) {
+	cfg := &config.Config{ThirdParty: config.ThirdPartyConfig{
+		Mocks: []string{"postgresql", "kafka"},
+		MockConfig: map[string]interface{}{
+			"kafka": map[string]interface{}{"port": "19092"},
+			"redis": map[string]interface{}{"password": "x"},
+		},
+	}}
+
+	values := Values(cfg)
+
+	assert.Equal(t, "5432", values["mocks.postgresql.port"], "default when not configured")
+	assert.Equal(t, "19092", values["mocks.kafka.port"], "configured value wins")
+	assert.Equal(t, "9094", values["mocks.kafka.docker-port"])
+	assert.NotContains(t, values, "mocks.redis.port", "mocks that are not enabled have no defaults")
+}
+
+func TestResolve_PlaceholderOnDefaultPort(t *testing.T) {
+	cfg := &config.Config{
+		AppConfig:  config.AppConfig{Environment: map[string]string{"DB_PORT": "${mocks.postgresql.port}"}},
+		ThirdParty: config.ThirdPartyConfig{Mocks: []string{"postgresql"}},
+	}
+
+	_, err := Resolve(cfg, seqAllocator(40000))
+
+	require.NoError(t, err)
+	assert.Equal(t, "5432", cfg.AppConfig.Environment["DB_PORT"])
+}
+
+func TestAllocate_RejectsInvalidHostPort(t *testing.T) {
+	for _, hp := range []string{"abc", "0", "70000"} {
+		cfg := newConfig()
+		cfg.AppConfig.HostPort = hp
+		err := Allocate(cfg, seqAllocator(40000))
+		require.Error(t, err, hp)
+		assert.True(t, gtErrors.Is(err, gtErrors.ErrConfigInvalid), hp)
+	}
+}
+
+func TestValues_NoAppEntriesWhenNotPublished(t *testing.T) {
+	cfg := &config.Config{AppConfig: config.AppConfig{HostPort: "41000"}}
+	values := Values(cfg)
+	assert.NotContains(t, values, "app.host-port", "port 0 publishes nothing")
+	assert.NotContains(t, values, "app.port")
+}

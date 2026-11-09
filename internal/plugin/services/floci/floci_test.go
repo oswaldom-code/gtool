@@ -47,7 +47,7 @@ func TestParseConfig(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "14566", got.Port)
 		assert.Equal(t, "eu-west-1", got.Region)
-		assert.Equal(t, []string{"reports", "exports"}, got.Buckets)
+		assert.Equal(t, []string{"reports", "42", "exports"}, got.Buckets, "numeric names are names, not ignored")
 		assert.Equal(t, []string{"orders"}, got.Queues)
 	})
 

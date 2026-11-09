@@ -4,7 +4,9 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/docker/docker/api/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSanitizeRunID(t *testing.T) {
@@ -83,4 +85,56 @@ func TestClientRunID(t *testing.T) {
 
 	c.SetRunID("")
 	assert.Empty(t, c.RunID())
+}
+
+func TestNewRunClient(t *testing.T) {
+	t.Run("generates a run ID when GTOOL_RUN_ID is unset", func(t *testing.T) {
+		t.Setenv(RunIDEnv, "")
+		c, err := NewRunClient(nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = c.Close() })
+		assert.Regexp(t, `^[0-9a-f]{8}$`, c.RunID())
+	})
+
+	t.Run("uses GTOOL_RUN_ID", func(t *testing.T) {
+		t.Setenv(RunIDEnv, "jenkins-app-7")
+		c, err := NewRunClient(nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = c.Close() })
+		assert.Equal(t, "jenkins-app-7", c.RunID())
+	})
+}
+
+func TestWithoutScopedRuns(t *testing.T) {
+	in := []types.Container{
+		{ID: "legacy"},
+		{ID: "scoped", Labels: map[string]string{RunLabel: "abc"}},
+		{ID: "other", Labels: map[string]string{"service": "redis"}},
+	}
+
+	kept, skipped := withoutScopedRuns(in)
+
+	assert.Equal(t, 1, skipped)
+	require.Len(t, kept, 2)
+	assert.Equal(t, "legacy", kept[0].ID)
+	assert.Equal(t, "other", kept[1].ID)
+	assert.Len(t, in, 3, "input slice must not be modified")
+
+	none, skipped := withoutScopedRuns(nil)
+	assert.Empty(t, none)
+	assert.Zero(t, skipped)
+}
+
+func TestClientSetAllRuns(t *testing.T) {
+	c := &Client{}
+	c.SetAllRuns(true)
+	assert.True(t, c.allRuns)
+}
+
+func TestHasLabels(t *testing.T) {
+	have := map[string]string{"managed-by": "gtool", "gtool-stable-mock": "postgresql"}
+	assert.True(t, hasLabels(have, map[string]string{"managed-by": "gtool"}))
+	assert.True(t, hasLabels(have, nil))
+	assert.False(t, hasLabels(have, map[string]string{"gtool-stable-mock": "pubsub"}))
+	assert.False(t, hasLabels(nil, map[string]string{"managed-by": "gtool"}))
 }

@@ -26,6 +26,19 @@ const (
 	containerNamePrefix = "gtool-mountebank"
 )
 
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "port", "imposters-path", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"port": defaultPort,
+	}
+}
+
 // MountebankPlugin implements the ServicePlugin interface for Mountebank,
 // a service virtualization tool used to mock HTTP/TCP dependencies.
 type MountebankPlugin struct {
@@ -62,7 +75,22 @@ func (p *MountebankPlugin) Name() string {
 	return "mountebank"
 }
 
-// imposterPorts returns the port declared by each imposter file in dir so the
+// imposterDefinitions returns the imposters declared in one file: either a
+// single imposter object or Mountebank's {"imposters": [...]} config format.
+func imposterDefinitions(content []byte) ([]json.RawMessage, error) {
+	var wrapper struct {
+		Imposters []json.RawMessage `json:"imposters"`
+	}
+	if err := json.Unmarshal(content, &wrapper); err != nil {
+		return nil, err
+	}
+	if wrapper.Imposters != nil {
+		return wrapper.Imposters, nil
+	}
+	return []json.RawMessage{content}, nil
+}
+
+// imposterPorts returns the port declared by each imposter in dir so the
 // container can publish them alongside the admin port. Unreadable or invalid
 // files are skipped here; loadImposters reports them when posting.
 func imposterPorts(dir string) []string {
@@ -77,15 +105,36 @@ func imposterPorts(dir string) []string {
 		if err != nil {
 			continue
 		}
-		var imposter struct {
-			Port int `json:"port"`
-		}
-		if err := json.Unmarshal(content, &imposter); err != nil || imposter.Port <= 0 {
+		defs, err := imposterDefinitions(content)
+		if err != nil {
 			continue
 		}
-		ports = append(ports, fmt.Sprintf("%d", imposter.Port))
+		for _, def := range defs {
+			var imposter struct {
+				Port int `json:"port"`
+			}
+			if json.Unmarshal(def, &imposter) == nil && imposter.Port > 0 {
+				ports = append(ports, fmt.Sprintf("%d", imposter.Port))
+			}
+		}
 	}
 	return ports
+}
+
+// portBindings publishes the admin API on adminHostPort and every imposter
+// port on the same host port. An imposter that reuses the admin port would
+// silently replace its mapping, so both collisions are configuration errors.
+func portBindings(adminHostPort string, imposters []string) (map[string]string, error) {
+	bindings := map[string]string{adminPort: adminHostPort}
+	for _, port := range imposters {
+		if port == adminPort || port == adminHostPort {
+			return nil, gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf(
+				"imposter port %s collides with the Mountebank admin port (container %s, host %s)",
+				port, adminPort, adminHostPort))
+		}
+		bindings[port] = port
+	}
+	return bindings, nil
 }
 
 // Launch starts the Mountebank service with given configuration
@@ -98,14 +147,14 @@ func (p *MountebankPlugin) Launch(ctx context.Context, config map[string]interfa
 	}
 	p.config = cfg
 
-	p.logger.Info("pulling Mountebank image", zap.String("image", cfg.Image))
+	p.logger.Info("ensuring Mountebank image", zap.String("image", cfg.Image))
 	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull Mountebank image")
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get Mountebank image")
 	}
 
-	bindings := map[string]string{adminPort: cfg.Port}
-	for _, port := range imposterPorts(cfg.ImpostersPath) {
-		bindings[port] = port
+	bindings, err := portBindings(cfg.Port, imposterPorts(cfg.ImpostersPath))
+	if err != nil {
+		return err
 	}
 
 	containerConfig := &docker.ContainerConfig{
@@ -122,16 +171,11 @@ func (p *MountebankPlugin) Launch(ctx context.Context, config map[string]interfa
 		zap.String("name", cfg.ContainerName),
 		zap.String("port", cfg.Port))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create Mountebank container")
-	}
-	p.containerID = containerID
-
-	p.logger.Info("starting Mountebank container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start Mountebank container")
 	}
+	p.containerID = containerID
 
 	p.logger.Info("waiting for Mountebank to be ready")
 	if err := p.waitForReady(ctx); err != nil {
@@ -144,10 +188,8 @@ func (p *MountebankPlugin) Launch(ctx context.Context, config map[string]interfa
 	if cfg.ImpostersPath != "" {
 		p.logger.Info("loading imposters", zap.String("path", cfg.ImpostersPath))
 		if err := p.loadImposters(ctx, cfg.ImpostersPath); err != nil {
-			// Don't fail the launch if imposters fail, just log the error
-			p.logger.Error("failed to load imposters",
-				zap.Error(err),
-				zap.String("path", cfg.ImpostersPath))
+			_ = p.Stop(context.Background())
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to load Mountebank imposters")
 		}
 	}
 
@@ -213,6 +255,7 @@ func (p *MountebankPlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found Mountebank container",
@@ -221,10 +264,13 @@ func (p *MountebankPlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -246,6 +292,7 @@ func (p *MountebankPlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("Mountebank service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -330,16 +377,10 @@ func (p *MountebankPlugin) parseConfig(config map[string]interface{}) (*Mounteba
 		ContainerName: fmt.Sprintf("%s-%d", containerNamePrefix, time.Now().Unix()),
 	}
 
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
 	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
-	if impostersPath, ok := config["imposters-path"].(string); ok && impostersPath != "" {
-		cfg.ImpostersPath = impostersPath
-	}
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
-	}
+	cfg.ImpostersPath = svcconfig.String(config, "imposters-path", cfg.ImpostersPath)
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
 
 	return cfg, nil
 }
@@ -352,6 +393,9 @@ func (p *MountebankPlugin) waitForReady(ctx context.Context) error {
 	for i := 0; i < maxRetries; i++ {
 		ready, err := p.IsReady(ctx)
 		if err != nil {
+			if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+				return err
+			}
 			p.logger.Debug("error checking readiness",
 				zap.Error(err),
 				zap.Int("attempt", i+1))
@@ -406,17 +450,8 @@ func (p *MountebankPlugin) loadImposters(ctx context.Context, impostersPath stri
 	return nil
 }
 
-// postImposter reads an imposter definition file and posts it to the admin API
-func (p *MountebankPlugin) postImposter(ctx context.Context, path string) error {
-	p.logger.Info("loading imposter", zap.String("file", path))
-
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to read imposter file")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		p.adminURL()+"imposters", bytes.NewReader(content))
+func (p *MountebankPlugin) createImposter(ctx context.Context, def json.RawMessage) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.adminURL()+"imposters", bytes.NewReader(def))
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to build imposter request")
 	}
@@ -429,8 +464,28 @@ func (p *MountebankPlugin) postImposter(ctx context.Context, path string) error 
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return gtErrors.New(gtErrors.ErrServiceFailed,
-			fmt.Sprintf("unexpected status posting imposter %s: %d", path, resp.StatusCode))
+		return gtErrors.New(gtErrors.ErrServiceFailed, fmt.Sprintf("unexpected status posting imposter: %d", resp.StatusCode))
+	}
+	return nil
+}
+
+// postImposter reads an imposter definition file and posts it to the admin API
+func (p *MountebankPlugin) postImposter(ctx context.Context, path string) error {
+	p.logger.Info("loading imposter", zap.String("file", path))
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to read imposter file")
+	}
+	defs, err := imposterDefinitions(content)
+	if err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, fmt.Sprintf("invalid imposter file %s", path))
+	}
+
+	for _, def := range defs {
+		if err := p.createImposter(ctx, def); err != nil {
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, fmt.Sprintf("failed to load an imposter from %s", path))
+		}
 	}
 
 	p.logger.Info("imposter loaded successfully", zap.String("file", path))

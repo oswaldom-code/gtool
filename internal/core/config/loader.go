@@ -11,6 +11,49 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// envRef matches $$ (a literal $), ${NAME} and $NAME. Only valid variable
+// names match, so gtool placeholders such as ${mocks.postgresql.port} are left
+// for ports.Interpolate.
+var envRef = regexp.MustCompile(`\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
+
+// expandValue replaces environment references in one scalar value. Unset
+// variables keep their reference; set-but-empty ones expand to "".
+func expandValue(value string) string {
+	return envRef.ReplaceAllStringFunc(value, func(match string) string {
+		if match == "$$" {
+			return "$"
+		}
+		name := strings.Trim(match, "${}")
+		if v, ok := os.LookupEnv(name); ok {
+			return v
+		}
+		return match
+	})
+}
+
+// expandNode expands scalar values (never mapping keys) after parsing, so a
+// variable can never change the document structure. A plain scalar that
+// changed is re-typed, so port: ${PORT} still decodes into an int.
+func expandNode(n *yaml.Node) {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		if v := expandValue(n.Value); v != n.Value {
+			n.Value = v
+			if n.Style == 0 {
+				n.Tag = ""
+			}
+		}
+	case yaml.MappingNode:
+		for i := 1; i < len(n.Content); i += 2 {
+			expandNode(n.Content[i])
+		}
+	default:
+		for _, c := range n.Content {
+			expandNode(c)
+		}
+	}
+}
+
 type Loader struct {
 	expandEnv bool
 }
@@ -33,14 +76,21 @@ func (l *Loader) Load(path string) (*config.Config, error) {
 			"failed to read configuration file")
 	}
 
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, gtErrors.Wrap(err, gtErrors.ErrConfigInvalid,
+			"failed to parse YAML configuration")
+	}
 	if l.expandEnv {
-		data = []byte(l.expandEnvVars(string(data)))
+		expandNode(&root)
 	}
 
 	cfg := config.DefaultConfig()
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, gtErrors.Wrap(err, gtErrors.ErrConfigInvalid,
-			"failed to parse YAML configuration")
+	if len(root.Content) > 0 {
+		if err := root.Decode(cfg); err != nil {
+			return nil, gtErrors.Wrap(err, gtErrors.ErrConfigInvalid,
+				"failed to parse YAML configuration")
+		}
 	}
 
 	l.applyEnvOverrides(cfg)
@@ -82,22 +132,6 @@ func (l *Loader) LoadFromPathOrDefault() *config.Config {
 		return config.DefaultConfig()
 	}
 	return cfg
-}
-
-func (l *Loader) expandEnvVars(content string) string {
-	re := regexp.MustCompile(`\$\{([^}]+)}|\$([A-Za-z_][A-Za-z0-9_]*)`)
-
-	return re.ReplaceAllStringFunc(content, func(match string) string {
-		varName := strings.TrimPrefix(match, "$")
-		varName = strings.TrimPrefix(varName, "{")
-		varName = strings.TrimSuffix(varName, "}")
-
-		if value := os.Getenv(varName); value != "" {
-			return value
-		}
-
-		return match
-	})
 }
 
 func (l *Loader) applyEnvOverrides(cfg *config.Config) {

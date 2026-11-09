@@ -15,9 +15,11 @@ import (
 )
 
 const (
-	defaultImage        = "couchbase:community-7.6.2"
-	defaultAdminPort    = "8091"
-	defaultDataPort     = "11210"
+	defaultImage     = "couchbase:community-7.6.2"
+	defaultAdminPort = "8091"
+	defaultDataPort  = "11210"
+	// queryPort serves N1QL and is published on the same host port.
+	queryPort           = "8093"
 	defaultUsername     = "Administrator"
 	defaultPassword     = "password"
 	defaultBucket       = "default"
@@ -31,6 +33,20 @@ const (
 	// clusterEndpoint is the in-container REST endpoint used by couchbase-cli.
 	clusterEndpoint = "localhost:8091"
 )
+
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "admin-port", "data-port", "user", "username", "password", "bucket", "services", "bucket-ram-mb", "cluster-ram-mb", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"admin-port": defaultAdminPort,
+		"data-port":  defaultDataPort,
+	}
+}
 
 // CouchbasePlugin implements the ServicePlugin interface for a single-node
 // Couchbase Server cluster.
@@ -82,17 +98,18 @@ func (p *CouchbasePlugin) Launch(ctx context.Context, config map[string]interfac
 	}
 	p.config = cfg
 
-	p.logger.Info("pulling Couchbase image", zap.String("image", cfg.Image))
-	if err := p.docker.PullImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull Couchbase image")
+	p.logger.Info("ensuring Couchbase image", zap.String("image", cfg.Image))
+	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get Couchbase image")
 	}
 
 	containerConfig := &docker.ContainerConfig{
 		Image: cfg.Image,
 		Name:  cfg.ContainerName,
 		PortBindings: map[string]string{
-			"8091":  cfg.AdminPort,
-			"11210": cfg.DataPort,
+			"8091":    cfg.AdminPort,
+			"11210":   cfg.DataPort,
+			queryPort: queryPort,
 		},
 		Labels: map[string]string{
 			"managed-by": "gtool",
@@ -104,16 +121,11 @@ func (p *CouchbasePlugin) Launch(ctx context.Context, config map[string]interfac
 		zap.String("name", cfg.ContainerName),
 		zap.String("admin-port", cfg.AdminPort))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create Couchbase container")
-	}
-	p.containerID = containerID
-
-	p.logger.Info("starting Couchbase container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start Couchbase container")
 	}
+	p.containerID = containerID
 
 	// Initialize the cluster (retries until the REST API is up)
 	p.logger.Info("initializing Couchbase cluster")
@@ -127,10 +139,8 @@ func (p *CouchbasePlugin) Launch(ctx context.Context, config map[string]interfac
 	if cfg.Bucket != "" {
 		p.logger.Info("creating bucket", zap.String("bucket", cfg.Bucket))
 		if err := p.createBucket(ctx, cfg); err != nil {
-			// Don't fail the launch if bucket creation fails, just log the error
-			p.logger.Error("failed to create bucket",
-				zap.Error(err),
-				zap.String("bucket", cfg.Bucket))
+			_ = p.Stop(context.Background())
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to create Couchbase bucket")
 		}
 	}
 
@@ -200,6 +210,7 @@ func (p *CouchbasePlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found Couchbase container",
@@ -208,10 +219,13 @@ func (p *CouchbasePlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -233,6 +247,7 @@ func (p *CouchbasePlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("Couchbase service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -247,7 +262,7 @@ func (p *CouchbasePlugin) GetConnectionInfo() (*plugin.ConnectionInfo, error) {
 		Port:     mustParsePort(p.config.AdminPort),
 		Protocol: "couchbase",
 		Metadata: map[string]string{
-			"username":          p.config.Username,
+			"user":              p.config.Username,
 			"password":          p.config.Password,
 			"bucket":            p.config.Bucket,
 			"connection-string": "couchbase://localhost",
@@ -327,27 +342,23 @@ func (p *CouchbasePlugin) parseConfig(config map[string]interface{}) (*Couchbase
 		ContainerName: fmt.Sprintf("%s-%d", containerNamePrefix, time.Now().Unix()),
 	}
 
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
 	cfg.AdminPort = svcconfig.Port(config, "admin-port", cfg.AdminPort)
 	cfg.DataPort = svcconfig.Port(config, "data-port", cfg.DataPort)
-	if username, ok := config["username"].(string); ok && username != "" {
-		cfg.Username = username
-	}
-	if password, ok := config["password"].(string); ok && password != "" {
-		cfg.Password = password
-	}
-	if bucket, ok := config["bucket"].(string); ok && bucket != "" {
-		cfg.Bucket = bucket
-	}
-	if services, ok := config["services"].(string); ok && services != "" {
-		cfg.Services = services
-	}
+	cfg.Username = svcconfig.String(config, "user", svcconfig.String(config, "username", cfg.Username))
+	cfg.Password = svcconfig.String(config, "password", cfg.Password)
+	cfg.Bucket = svcconfig.String(config, "bucket", cfg.Bucket)
+	cfg.Services = svcconfig.String(config, "services", cfg.Services)
 	cfg.BucketRAMMB = intOrFloat(config, "bucket-ram-mb", cfg.BucketRAMMB)
 	cfg.ClusterRAMMB = intOrFloat(config, "cluster-ram-mb", cfg.ClusterRAMMB)
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
+
+	// The cluster map advertises the container's own ports, so an SDK on the
+	// host can only reach the data service on 11210 itself.
+	if cfg.DataPort != defaultDataPort {
+		return nil, gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf(
+			"couchbase: data-port must be %s (the cluster advertises its container ports), got %s",
+			defaultDataPort, cfg.DataPort))
 	}
 
 	return cfg, nil
@@ -382,6 +393,9 @@ func (p *CouchbasePlugin) initializeCluster(ctx context.Context) error {
 			return nil
 		}
 
+		if _, runErr := p.docker.IsContainerRunning(ctx, p.containerID); gtErrors.Is(runErr, gtErrors.ErrContainerExited) {
+			return runErr
+		}
 		p.logger.Debug("cluster not ready yet",
 			zap.Error(err),
 			zap.String("output", output),

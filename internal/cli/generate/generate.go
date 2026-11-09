@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/oswaldom-code/gtool/internal/infra/termout"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 //go:embed templates/component-config.yml
@@ -69,28 +72,43 @@ Examples:
 	return cmd
 }
 
+// scaffoldDirs are the directories the template references, created next to
+// the generated file so it validates right away.
+var scaffoldDirs = []string{
+	"test/component/features",
+	"test/component/mocks-data/postgresql",
+}
+
 func runGenerateConfig(cmd *cobra.Command, args []string) error {
 	// Check if file exists
 	if _, err := os.Stat(outputFile); err == nil && !force {
-		return fmt.Errorf("file %s already exists. Use --force to overwrite", outputFile)
+		return gtErrors.New(gtErrors.ErrInvalidArgument, fmt.Sprintf("file %s already exists. Use --force to overwrite", outputFile))
 	}
 
 	// Get absolute path
 	absPath, err := filepath.Abs(outputFile)
 	if err != nil {
-		return fmt.Errorf("failed to resolve path: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrInvalidArgument, "failed to resolve path")
 	}
 
 	// Write file using embedded template
 	if err := os.WriteFile(outputFile, []byte(configTemplate), 0644); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+		return gtErrors.Wrap(err, gtErrors.ErrInvalidArgument, "failed to write config file")
 	}
 
-	fmt.Printf("✅ Configuration file created: %s\n\n", absPath)
+	base := filepath.Dir(absPath)
+	for _, dir := range scaffoldDirs {
+		if err := os.MkdirAll(filepath.Join(base, dir), 0o755); err != nil {
+			return gtErrors.Wrap(err, gtErrors.ErrInvalidArgument, fmt.Sprintf("failed to create %s", dir))
+		}
+	}
+
+	termout.Printf("✅ Configuration file created: %s\n\n", absPath)
 	fmt.Println("Next steps:")
 	fmt.Println("  1. Edit the configuration file to match your needs")
-	fmt.Println("  2. Validate: gtool config validate")
-	fmt.Println("  3. Start services: gtool s up")
+	fmt.Println("  2. Add Karate features to ./test/component/features")
+	fmt.Println("  3. Validate: gtool config validate")
+	fmt.Println("  4. Run the pipeline: gtool test")
 
 	return nil
 }

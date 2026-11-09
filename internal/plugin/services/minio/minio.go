@@ -3,6 +3,7 @@ package minio
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -15,13 +16,27 @@ import (
 )
 
 const (
-	defaultImage        = "minio/minio:latest"
+	defaultImage        = "cgr.dev/chainguard/minio:latest"
 	defaultPort         = "9000"
 	defaultConsolePort  = "9001"
 	defaultAccessKey    = "minioadmin"
 	defaultSecretKey    = "minioadmin"
 	containerNamePrefix = "gtool-minio"
 )
+
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "port", "console-port", "user", "password", "access-key", "secret-key", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"port":         defaultPort,
+		"console-port": defaultConsolePort,
+	}
+}
 
 // MinIOPlugin implements the ServicePlugin interface for MinIO (S3-compatible storage).
 //
@@ -74,9 +89,9 @@ func (p *MinIOPlugin) Launch(ctx context.Context, config map[string]interface{})
 	p.config = cfg
 
 	// Pull image
-	p.logger.Info("pulling MinIO image", zap.String("image", cfg.Image))
+	p.logger.Info("ensuring MinIO image", zap.String("image", cfg.Image))
 	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull MinIO image")
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get MinIO image")
 	}
 
 	// Create container
@@ -103,17 +118,11 @@ func (p *MinIOPlugin) Launch(ctx context.Context, config map[string]interface{})
 		zap.String("port", cfg.Port),
 		zap.String("consolePort", cfg.ConsolePort))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create MinIO container")
-	}
-	p.containerID = containerID
-
-	// Start container
-	p.logger.Info("starting MinIO container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start MinIO container")
 	}
+	p.containerID = containerID
 
 	// Wait for MinIO to be ready
 	p.logger.Info("waiting for MinIO to be ready")
@@ -136,16 +145,36 @@ func (p *MinIOPlugin) IsReady(ctx context.Context) (bool, error) {
 		return false, gtErrors.New(gtErrors.ErrServiceNotRunning, "MinIO container not started")
 	}
 
-	// The minio/minio image does not reliably bundle curl or the mc client, so
-	// we cannot probe the health endpoint via ExecInContainer. Readiness is
-	// therefore limited to checking that the container is running (weak
-	// readiness, improvable in the future).
 	running, err := p.docker.IsContainerRunning(ctx, p.containerID)
 	if err != nil {
 		return false, gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to check container status")
 	}
+	if !running {
+		return false, nil
+	}
 
-	return running, nil
+	// The image ships neither curl nor mc, so probe the S3 liveness endpoint
+	// from the host through the published port.
+	return probeLive(ctx, p.healthURL()), nil
+}
+
+func (p *MinIOPlugin) healthURL() string {
+	return fmt.Sprintf("http://localhost:%s/minio/health/live", p.config.Port)
+}
+
+var healthClient = &http.Client{Timeout: 2 * time.Second}
+
+func probeLive(ctx context.Context, url string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := healthClient.Do(req)
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // Stop terminates the MinIO service
@@ -174,7 +203,7 @@ func (p *MinIOPlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
-		// Stop all matching containers
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found MinIO container",
@@ -183,10 +212,13 @@ func (p *MinIOPlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -210,6 +242,7 @@ func (p *MinIOPlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("MinIO service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -224,10 +257,10 @@ func (p *MinIOPlugin) GetConnectionInfo() (*plugin.ConnectionInfo, error) {
 		Port:     mustParsePort(p.config.Port),
 		Protocol: "s3",
 		Metadata: map[string]string{
-			"accessKey":   p.config.AccessKey,
-			"secretKey":   p.config.SecretKey,
-			"endpoint":    fmt.Sprintf("http://localhost:%s", p.config.Port),
-			"consolePort": p.config.ConsolePort,
+			"user":         p.config.AccessKey,
+			"password":     p.config.SecretKey,
+			"endpoint":     fmt.Sprintf("http://localhost:%s", p.config.Port),
+			"console-port": p.config.ConsolePort,
 		},
 	}, nil
 }
@@ -306,20 +339,12 @@ func (p *MinIOPlugin) parseConfig(config map[string]interface{}) (*MinIOConfig, 
 	}
 
 	// Override with provided values
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
 	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
 	cfg.ConsolePort = svcconfig.Port(config, "console-port", cfg.ConsolePort)
-	if accessKey, ok := config["access-key"].(string); ok && accessKey != "" {
-		cfg.AccessKey = accessKey
-	}
-	if secretKey, ok := config["secret-key"].(string); ok && secretKey != "" {
-		cfg.SecretKey = secretKey
-	}
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
-	}
+	cfg.AccessKey = svcconfig.String(config, "user", svcconfig.String(config, "access-key", cfg.AccessKey))
+	cfg.SecretKey = svcconfig.String(config, "password", svcconfig.String(config, "secret-key", cfg.SecretKey))
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
 
 	return cfg, nil
 }
@@ -332,6 +357,9 @@ func (p *MinIOPlugin) waitForReady(ctx context.Context) error {
 	for i := 0; i < maxRetries; i++ {
 		ready, err := p.IsReady(ctx)
 		if err != nil {
+			if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+				return err
+			}
 			p.logger.Debug("error checking readiness",
 				zap.Error(err),
 				zap.Int("attempt", i+1))

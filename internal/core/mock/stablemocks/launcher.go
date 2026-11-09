@@ -19,6 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	"github.com/oswaldom-code/gtool/internal/infra/termout"
 	"github.com/oswaldom-code/gtool/pkg/config"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
@@ -29,7 +30,8 @@ const (
 	pubsubImage     = "gcr.io/google.com/cloudsdktool/cloud-sdk:emulators"
 	mountebankImage = "bbyars/mountebank:2.9.1"
 
-	pubsubMockPort = "9085"
+	pubsubMockPort      = "9085"
+	mountebankAdminPort = "2525"
 
 	readyAttempts = 60
 	readyInterval = 3 * time.Second
@@ -45,7 +47,7 @@ type dockerClient interface {
 	CreateContainer(ctx context.Context, cfg *docker.ContainerConfig) (string, error)
 	StartContainer(ctx context.Context, id string) error
 	GetContainerLogs(ctx context.Context, id string, tail int) (string, error)
-	RemoveContainerByName(ctx context.Context, name string) (bool, error)
+	RemoveContainerByName(ctx context.Context, name string, labels map[string]string) (bool, error)
 }
 
 // Launcher launches and stops the mock containers.
@@ -90,7 +92,7 @@ type launchSpec struct {
 	ports       map[string]string // container port -> host port
 	mounts      []docker.Mount
 	env         []string
-	readyLogs   []string // every entry must be present in the logs to be ready
+	readyLogs   []string // entries must appear in the logs in this order to be ready
 	readyHTTP   string   // GET url that must return 200 to be ready
 
 	// pubsub-only: resources created over REST after readiness.
@@ -118,13 +120,13 @@ func (l *Launcher) Up(ctx context.Context, services []string, cfg *config.Config
 	}
 
 	for _, spec := range specs {
-		fmt.Printf("🚀 Launching %s...\n", spec.name)
+		termout.Printf("🚀 Launching %s...\n", spec.name)
 		if err := l.launchOne(ctx, spec); err != nil {
 			return err
 		}
 	}
 
-	fmt.Printf("⏳ Waiting for mocks to be ready...\n")
+	termout.Printf("⏳ Waiting for mocks to be ready...\n")
 	for _, spec := range specs {
 		if err := l.waitReady(ctx, spec); err != nil {
 			return err
@@ -134,10 +136,14 @@ func (l *Launcher) Up(ctx context.Context, services []string, cfg *config.Config
 				return err
 			}
 		}
-		fmt.Printf("✅ %s ready\n", spec.name)
+		termout.Printf("✅ %s ready\n", spec.name)
 	}
 
 	return nil
+}
+
+func stableLabels(name string) map[string]string {
+	return map[string]string{"managed-by": "gtool", "gtool-stable-mock": name}
 }
 
 // Down removes the fixed-name mock containers.
@@ -146,19 +152,23 @@ func (l *Launcher) Down(ctx context.Context, services []string) error {
 		services = Supported
 	}
 	for _, name := range services {
-		removed, err := l.docker.RemoveContainerByName(ctx, name)
+		removed, err := l.docker.RemoveContainerByName(ctx, name, stableLabels(name))
+		if gtErrors.Is(err, gtErrors.ErrContainerForeign) {
+			l.logger.Warn("skipping container not created by gtool", zap.String("name", name))
+			continue
+		}
 		if err != nil {
 			return err
 		}
 		if removed {
-			fmt.Printf("🛑 %s stopped\n", name)
+			termout.Printf("🛑 %s stopped\n", name)
 		}
 	}
 	return nil
 }
 
 func (l *Launcher) launchOne(ctx context.Context, spec *launchSpec) error {
-	if _, err := l.docker.RemoveContainerByName(ctx, spec.name); err != nil {
+	if _, err := l.docker.RemoveContainerByName(ctx, spec.name, stableLabels(spec.name)); err != nil {
 		return err
 	}
 	if err := l.docker.EnsureImage(ctx, spec.image); err != nil {
@@ -176,10 +186,7 @@ func (l *Launcher) launchOne(ctx context.Context, spec *launchSpec) error {
 		Mounts:       spec.mounts,
 		NetworkMode:  spec.networkMode,
 		Init:         true,
-		Labels: map[string]string{
-			"managed-by":        "gtool",
-			"gtool-stable-mock": spec.name,
-		},
+		Labels:       stableLabels(spec.name),
 	}
 
 	id, err := l.docker.CreateContainer(ctx, cc)
@@ -198,19 +205,18 @@ func (l *Launcher) waitReady(ctx context.Context, spec *launchSpec) error {
 	if spec.readyHTTP != "" {
 		return l.waitHTTP(ctx, spec.readyHTTP)
 	}
-	// No readiness signal (e.g. mountebank loads its imposters at startup).
 	if len(spec.readyLogs) == 0 {
 		return nil
 	}
 
 	for attempt := 0; attempt < readyAttempts; attempt++ {
 		logs, err := l.docker.GetContainerLogs(ctx, spec.name, 500)
-		if err == nil && containsAll(logs, spec.readyLogs) {
+		if err == nil && containsInOrder(logs, spec.readyLogs) {
 			return nil
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return gtErrors.Wrap(ctx.Err(), gtErrors.ErrServiceNotReady, "cancelled while waiting for "+spec.name)
 		case <-time.After(readyInterval):
 		}
 	}
@@ -234,7 +240,7 @@ func (l *Launcher) waitHTTP(ctx context.Context, url string) error {
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return gtErrors.Wrap(ctx.Err(), gtErrors.ErrServiceNotReady, "cancelled while waiting for "+url)
 		case <-time.After(readyInterval):
 		}
 	}
@@ -256,6 +262,7 @@ func (l *Launcher) specFor(name string, cfg *config.Config) (*launchSpec, error)
 			entrypoint:  []string{"mb"},
 			cmd:         []string{"start", "--configfile", "/imposters/imposters.ejs", "--allowInjection"},
 			mounts:      []docker.Mount{{Type: "bind", Source: dir, Target: "/imposters"}},
+			readyHTTP:   "http://localhost:" + mountebankAdminPort + "/imposters",
 		}, nil
 
 	case "postgresql":
@@ -382,11 +389,17 @@ func parsePubsub(cfg *config.Config) (string, []pubsubTopic, error) {
 	return pc.ProjectID, topics, nil
 }
 
-func containsAll(haystack string, needles []string) bool {
+// containsInOrder reports whether every needle appears in haystack after the
+// previous one. Postgres prints "ready to accept connections" from its
+// temporary init server too, so only the line after "init process complete"
+// means the final server is up.
+func containsInOrder(haystack string, needles []string) bool {
 	for _, n := range needles {
-		if !strings.Contains(haystack, n) {
+		i := strings.Index(haystack, n)
+		if i < 0 {
 			return false
 		}
+		haystack = haystack[i+len(n):]
 	}
 	return true
 }

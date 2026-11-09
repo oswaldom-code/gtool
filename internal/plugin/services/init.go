@@ -1,6 +1,8 @@
 package services
 
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
@@ -16,62 +18,35 @@ import (
 	"github.com/oswaldom-code/gtool/internal/plugin/services/postgresql"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/pubsub"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/redis"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
+// RegisterAll registers every service plugin, or none: names are checked
+// first, so a conflict never leaves the registry half filled.
 func RegisterAll(registry *plugin.Registry, dockerClient *docker.Client, logger *zap.Logger) error {
-	postgresPlugin := postgresql.NewPostgreSQLPlugin(dockerClient, logger)
-	if err := registry.RegisterService(postgresPlugin); err != nil {
-		return err
+	plugins := []plugin.ServicePlugin{
+		postgresql.NewPostgreSQLPlugin(dockerClient, logger),
+		mountebank.NewMountebankPlugin(dockerClient, logger),
+		kafka.NewKafkaPlugin(dockerClient, logger),
+		couchbase.NewCouchbasePlugin(dockerClient, logger),
+		pubsub.NewPubSubPlugin(dockerClient, logger),
+		gcs.NewGCSPlugin(dockerClient, logger),
+		redis.NewRedisPlugin(dockerClient, logger),
+		mongodb.NewMongoDBPlugin(dockerClient, logger),
+		mysql.NewMySQLPlugin(dockerClient, logger),
+		minio.NewMinIOPlugin(dockerClient, logger),
+		floci.NewFlociPlugin(dockerClient, logger),
 	}
 
-	mountebankPlugin := mountebank.NewMountebankPlugin(dockerClient, logger)
-	if err := registry.RegisterService(mountebankPlugin); err != nil {
-		return err
+	for _, p := range plugins {
+		if _, err := registry.GetService(p.Name()); err == nil {
+			return gtErrors.New(gtErrors.ErrInvalidArgument, fmt.Sprintf("service plugin %s already registered", p.Name()))
+		}
 	}
-
-	kafkaPlugin := kafka.NewKafkaPlugin(dockerClient, logger)
-	if err := registry.RegisterService(kafkaPlugin); err != nil {
-		return err
-	}
-
-	couchbasePlugin := couchbase.NewCouchbasePlugin(dockerClient, logger)
-	if err := registry.RegisterService(couchbasePlugin); err != nil {
-		return err
-	}
-
-	pubsubPlugin := pubsub.NewPubSubPlugin(dockerClient, logger)
-	if err := registry.RegisterService(pubsubPlugin); err != nil {
-		return err
-	}
-
-	gcsPlugin := gcs.NewGCSPlugin(dockerClient, logger)
-	if err := registry.RegisterService(gcsPlugin); err != nil {
-		return err
-	}
-
-	redisPlugin := redis.NewRedisPlugin(dockerClient, logger)
-	if err := registry.RegisterService(redisPlugin); err != nil {
-		return err
-	}
-
-	mongoPlugin := mongodb.NewMongoDBPlugin(dockerClient, logger)
-	if err := registry.RegisterService(mongoPlugin); err != nil {
-		return err
-	}
-
-	mysqlPlugin := mysql.NewMySQLPlugin(dockerClient, logger)
-	if err := registry.RegisterService(mysqlPlugin); err != nil {
-		return err
-	}
-
-	minioPlugin := minio.NewMinIOPlugin(dockerClient, logger)
-	if err := registry.RegisterService(minioPlugin); err != nil {
-		return err
-	}
-
-	flociPlugin := floci.NewFlociPlugin(dockerClient, logger)
-	if err := registry.RegisterService(flociPlugin); err != nil {
-		return err
+	for _, p := range plugins {
+		if err := registry.RegisterService(p); err != nil {
+			return err
+		}
 	}
 
 	logger.Info("all service plugins registered successfully")

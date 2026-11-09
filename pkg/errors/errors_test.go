@@ -163,6 +163,36 @@ func TestIs(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "code of a wrapped GTError",
+			err:      Wrap(New(ErrContainerForeign, "not ours"), ErrServiceFailed, "launch failed"),
+			code:     ErrContainerForeign,
+			expected: true,
+		},
+		{
+			name:     "code through fmt.Errorf %w",
+			err:      fmt.Errorf("context: %w", New(ErrServiceNotReady, "slow")),
+			code:     ErrServiceNotReady,
+			expected: true,
+		},
+		{
+			name:     "code inside errors.Join",
+			err:      errors.Join(errors.New("a"), New(ErrServiceNotReady, "slow")),
+			code:     ErrServiceNotReady,
+			expected: true,
+		},
+		{
+			name:     "code absent from the chain",
+			err:      Wrap(errors.Join(errors.New("a"), New(ErrConfigInvalid, "x")), ErrServiceFailed, "y"),
+			code:     ErrTestFailed,
+			expected: false,
+		},
+		{
+			name:     "typed nil GTError",
+			err:      (*GTError)(nil),
+			code:     ErrConfigInvalid,
+			expected: false,
+		},
+		{
 			name:     "non-GTError",
 			err:      errors.New("standard error"),
 			code:     ErrConfigInvalid,

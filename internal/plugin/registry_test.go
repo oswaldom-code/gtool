@@ -337,3 +337,10 @@ func BenchmarkRegistry_ListServices(b *testing.B) {
 		registry.ListServices()
 	}
 }
+
+func TestRegistry_RejectsNilPlugins(t *testing.T) {
+	r := NewRegistry()
+	assert.Error(t, r.RegisterService(nil))
+	assert.Error(t, r.RegisterLauncher(nil))
+	assert.Error(t, r.RegisterExecutor(nil))
+}

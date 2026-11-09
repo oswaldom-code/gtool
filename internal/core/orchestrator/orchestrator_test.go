@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -161,4 +162,71 @@ func TestBuildServiceConfigs(t *testing.T) {
 	require.Len(t, got, 2)
 	assert.Equal(t, "5432", got["postgresql"]["port"])
 	assert.NotNil(t, got["kafka"], "mock without config still gets an empty map")
+}
+
+// publishedApp returns a config whose app is published on the host.
+func publishedApp() *config.Config {
+	cfg := cfgWith(nil, "myapp:latest")
+	cfg.AppConfig.Port = 8080
+	cfg.AppConfig.HostPort = "41234"
+	cfg.AppConfig.HealthPath = "/health"
+	return cfg
+}
+
+func TestOrchestrator_Run_WaitsForAppBeforeTests(t *testing.T) {
+	app := &fakeApp{}
+	tests := &fakeTests{}
+	o := NewOrchestrator(publishedApp(), &fakeMocks{}, app, tests, nil)
+	var gotURL string
+	var gotTimeout time.Duration
+	o.waitApp = func(_ context.Context, url string, timeout time.Duration) error {
+		assert.False(t, tests.called, "tests must not start before the app is ready")
+		gotURL, gotTimeout = url, timeout
+		return nil
+	}
+
+	_, err := o.Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://localhost:41234/health", gotURL)
+	assert.Equal(t, 180*time.Second, gotTimeout)
+	assert.True(t, tests.called)
+}
+
+func TestOrchestrator_Run_AppNotReady(t *testing.T) {
+	app := &fakeApp{}
+	tests := &fakeTests{}
+	o := NewOrchestrator(publishedApp(), &fakeMocks{}, app, tests, nil)
+	o.waitApp = func(context.Context, string, time.Duration) error { return errors.New("connection reset") }
+
+	_, err := o.Run(context.Background())
+
+	require.Error(t, err)
+	assert.True(t, gtErrors.Is(err, gtErrors.ErrServiceNotReady))
+	assert.False(t, tests.called)
+	assert.Equal(t, 1, app.stopCalls, "the app must still be torn down")
+}
+
+func TestOrchestrator_Run_SkipsReadinessWhenNotPublished(t *testing.T) {
+	cfg := cfgWith(nil, "myapp:latest")
+	cfg.AppConfig.Port = 0
+	o := NewOrchestrator(cfg, &fakeMocks{}, &fakeApp{}, &fakeTests{}, nil)
+	o.waitApp = func(context.Context, string, time.Duration) error {
+		t.Fatal("no readiness wait for an app without a published port")
+		return nil
+	}
+
+	_, err := o.Run(context.Background())
+	require.NoError(t, err)
+}
+
+func TestAppHealthURL_DefaultPath(t *testing.T) {
+	cfg := cfgWith(nil, "myapp:latest")
+	cfg.AppConfig.Port = 8080
+	assert.Equal(t, "http://localhost:8080/", appHealthURL(cfg))
+}
+
+func TestStartupTimeout_Fallback(t *testing.T) {
+	cfg := &config.Config{}
+	assert.Equal(t, config.DefaultConfig().Orchestration.StartupTimeout, startupTimeout(cfg))
 }

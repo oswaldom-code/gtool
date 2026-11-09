@@ -2,6 +2,7 @@ package stablekarate
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,11 +14,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 type fakeDocker struct {
 	created    []*docker.ContainerConfig
 	exitCode   int
+	inspectErr error
 	removed    bool
 	reportsSrc string
 }
@@ -59,7 +62,7 @@ func (f *fakeDocker) InspectContainer(context.Context, string) (*dockertypes.Con
 		ContainerJSONBase: &dockertypes.ContainerJSONBase{
 			State: &dockertypes.ContainerState{ExitCode: f.exitCode},
 		},
-	}, nil
+	}, f.inspectErr
 }
 
 func (f *fakeDocker) GetContainerLogs(context.Context, string, int) (string, error) {
@@ -160,6 +163,19 @@ func TestRunFailsOnNonZeroExit(t *testing.T) {
 	assert.Equal(t, 1, res.ExitCode)
 }
 
+func TestRunInspectFailureIsNotAPass(t *testing.T) {
+	features, reports := dirs(t)
+	fd := &fakeDocker{exitCode: 0, inspectErr: errors.New("daemon hiccup")}
+	r, _ := newRunner(t, fd)
+
+	res, err := r.Run(context.Background(), Options{FeaturesPath: features, ReportsPath: reports})
+
+	require.Error(t, err)
+	assert.Nil(t, res)
+	assert.Contains(t, err.Error(), "could not determine the test result")
+	assert.True(t, fd.removed, "container must still be cleaned up")
+}
+
 func TestRunErrorsWhenFeaturesMissing(t *testing.T) {
 	fd := &fakeDocker{}
 	r, _ := newRunner(t, fd)
@@ -175,4 +191,41 @@ func TestRunImageOverride(t *testing.T) {
 	_, err := r.Run(context.Background(), Options{FeaturesPath: features, ReportsPath: reports, Image: "custom:tag"})
 	require.NoError(t, err)
 	assert.Equal(t, "custom:tag", fd.karateCfg().Image)
+}
+
+func TestRunRefusesDangerousReportsPaths(t *testing.T) {
+	features, _ := dirs(t)
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	for name, reports := range map[string]string{
+		"working directory": ".",
+		"parent of cwd":     filepath.Dir(wd),
+		"home":              home,
+		"root":              "/",
+		"features parent":   filepath.Dir(features),
+		"features itself":   features,
+	} {
+		t.Run(name, func(t *testing.T) {
+			fd := &fakeDocker{}
+			r, _ := newRunner(t, fd)
+
+			_, err := r.Run(context.Background(), Options{FeaturesPath: features, ReportsPath: reports})
+
+			require.Error(t, err)
+			assert.True(t, gtErrors.Is(err, gtErrors.ErrInvalidArgument))
+			assert.Empty(t, fd.created, "nothing may run, nothing may be deleted")
+			assert.DirExists(t, features)
+		})
+	}
+}
+
+func TestIsWithin(t *testing.T) {
+	assert.True(t, isWithin("/a/b", "/a"))
+	assert.True(t, isWithin("/a", "/a"))
+	assert.False(t, isWithin("/a", "/a/b"))
+	assert.False(t, isWithin("/ab", "/a"))
+	assert.False(t, isWithin("/x/..y", "/a"))
 }

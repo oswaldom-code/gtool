@@ -70,12 +70,20 @@ func (m *DockerManager) Start(ctx context.Context, cfg *plugin.AppConfig) error 
 		return gtErrors.New(gtErrors.ErrInvalidArgument, "docker-image is required to start the application")
 	}
 
-	running, err := m.docker.ListContainersByLabels(ctx, appLabels())
+	existing, err := m.docker.ListContainersByLabels(ctx, appLabels())
 	if err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to check for running application")
 	}
-	if len(running) > 0 {
-		return gtErrors.New(gtErrors.ErrServiceFailed, "application is already running")
+	for _, c := range existing {
+		if c.State == "running" {
+			return gtErrors.New(gtErrors.ErrServiceFailed, "application is already running")
+		}
+	}
+	for _, c := range existing {
+		m.logger.Info("removing exited application container", zap.String("containerID", c.ID), zap.String("state", c.State))
+		if err := m.docker.RemoveContainer(ctx, c.ID, true); err != nil {
+			return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to remove exited application container")
+		}
 	}
 
 	m.logger.Info("ensuring application image", zap.String("image", cfg.DockerImage))

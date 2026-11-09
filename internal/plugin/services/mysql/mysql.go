@@ -22,6 +22,19 @@ const (
 	containerNamePrefix = "gtool-mysql"
 )
 
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "port", "root-password", "database", "user", "password", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"port": defaultPort,
+	}
+}
+
 // MySQLPlugin implements the ServicePlugin interface for MySQL
 type MySQLPlugin struct {
 	docker      *docker.Client
@@ -70,9 +83,9 @@ func (p *MySQLPlugin) Launch(ctx context.Context, config map[string]interface{})
 	p.config = cfg
 
 	// Pull image
-	p.logger.Info("pulling MySQL image", zap.String("image", cfg.Image))
+	p.logger.Info("ensuring MySQL image", zap.String("image", cfg.Image))
 	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull MySQL image")
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get MySQL image")
 	}
 
 	// Build environment
@@ -105,17 +118,11 @@ func (p *MySQLPlugin) Launch(ctx context.Context, config map[string]interface{})
 		zap.String("name", cfg.ContainerName),
 		zap.String("port", cfg.Port))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create MySQL container")
-	}
-	p.containerID = containerID
-
-	// Start container
-	p.logger.Info("starting MySQL container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start MySQL container")
 	}
+	p.containerID = containerID
 
 	// Wait for MySQL to be ready
 	p.logger.Info("waiting for MySQL to be ready")
@@ -150,12 +157,14 @@ func (p *MySQLPlugin) IsReady(ctx context.Context) (bool, error) {
 
 	// Check if MySQL is ready by executing mysqladmin ping
 	output, err := p.docker.ExecInContainer(ctx, p.containerID, &docker.ExecConfig{
-		Cmd:          []string{"mysqladmin", "ping", "-uroot", fmt.Sprintf("--password=%s", p.config.RootPassword), "--silent"},
+		Cmd: []string{"mysqladmin", "ping", "-h", "127.0.0.1", "--protocol=TCP",
+			"-uroot", fmt.Sprintf("--password=%s", p.config.RootPassword)},
 		AttachStdout: true,
 		AttachStderr: true,
 	})
 
-	if err != nil {
+	// mysqladmin ping exits 0 even on "Access denied", so require the reply.
+	if err != nil || !strings.Contains(output, "mysqld is alive") {
 		p.logger.Debug("MySQL not ready yet", zap.String("output", output))
 		return false, nil
 	}
@@ -189,7 +198,7 @@ func (p *MySQLPlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
-		// Stop all matching containers
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found MySQL container",
@@ -198,10 +207,13 @@ func (p *MySQLPlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -225,6 +237,7 @@ func (p *MySQLPlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("MySQL service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -326,24 +339,22 @@ func (p *MySQLPlugin) parseConfig(config map[string]interface{}) (*MySQLConfig, 
 	}
 
 	// Override with provided values
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
 	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
-	if rootPassword, ok := config["root-password"].(string); ok && rootPassword != "" {
-		cfg.RootPassword = rootPassword
+	cfg.RootPassword = svcconfig.String(config, "root-password", cfg.RootPassword)
+	cfg.Database = svcconfig.String(config, "database", cfg.Database)
+	cfg.User = svcconfig.String(config, "user", cfg.User)
+	cfg.Password = svcconfig.String(config, "password", cfg.Password)
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
+
+	// The official image skips an extra user without a password and refuses
+	// "root" (use root-password instead); both would only surface as a readiness
+	// timeout, so reject them up front.
+	if strings.EqualFold(cfg.User, "root") {
+		return nil, gtErrors.New(gtErrors.ErrConfigInvalid, "mysql: user cannot be root; set root-password instead")
 	}
-	if database, ok := config["database"].(string); ok && database != "" {
-		cfg.Database = database
-	}
-	if user, ok := config["user"].(string); ok && user != "" {
-		cfg.User = user
-	}
-	if password, ok := config["password"].(string); ok && password != "" {
-		cfg.Password = password
-	}
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
+	if cfg.User != "" && cfg.Password == "" {
+		return nil, gtErrors.New(gtErrors.ErrConfigInvalid, "mysql: user requires a password")
 	}
 
 	return cfg, nil
@@ -357,6 +368,9 @@ func (p *MySQLPlugin) waitForReady(ctx context.Context) error {
 	for i := 0; i < maxRetries; i++ {
 		ready, err := p.IsReady(ctx)
 		if err != nil {
+			if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+				return err
+			}
 			p.logger.Debug("error checking readiness",
 				zap.Error(err),
 				zap.Int("attempt", i+1))

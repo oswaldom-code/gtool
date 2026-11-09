@@ -6,6 +6,9 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/docker/docker/api/types"
+	"go.uber.org/zap"
 )
 
 const (
@@ -63,4 +66,38 @@ func withRunSuffix(name, runID string) string {
 		return name
 	}
 	return name + "-" + runID
+}
+
+func hasLabels(have, want map[string]string) bool {
+	for k, v := range want {
+		if have[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// withoutScopedRuns drops containers that belong to a scoped run, so an
+// unscoped command only acts on its own (legacy, label-less) containers.
+func withoutScopedRuns(containers []types.Container) ([]types.Container, int) {
+	kept := containers[:0:0]
+	for _, ct := range containers {
+		if ct.Labels[RunLabel] == "" {
+			kept = append(kept, ct)
+		}
+	}
+	return kept, len(containers) - len(kept)
+}
+
+// NewRunClient returns a client scoped to one pipeline run (GTOOL_RUN_ID or a
+// generated ID). Every single-invocation pipeline (test, stress) must use it so
+// concurrent runs never see or tear down each other's containers.
+func NewRunClient(logger *zap.Logger) (*Client, error) {
+	c, err := NewClient(logger)
+	if err != nil {
+		return nil, err
+	}
+	c.SetRunID(ResolveRunID(true))
+	c.logger.Info("pipeline run", zap.String("run-id", c.RunID()))
+	return c, nil
 }

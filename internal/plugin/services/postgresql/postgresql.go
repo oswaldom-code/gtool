@@ -25,6 +25,19 @@ const (
 	containerNamePrefix = "gtool-postgresql"
 )
 
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "port", "user", "password", "database", "scripts-path", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"port": defaultPort,
+	}
+}
+
 // PostgreSQLPlugin implements the ServicePlugin interface for PostgreSQL
 type PostgreSQLPlugin struct {
 	docker      *docker.Client
@@ -73,9 +86,9 @@ func (p *PostgreSQLPlugin) Launch(ctx context.Context, config map[string]interfa
 	p.config = cfg
 
 	// Pull image
-	p.logger.Info("pulling PostgreSQL image", zap.String("image", cfg.Image))
+	p.logger.Info("ensuring PostgreSQL image", zap.String("image", cfg.Image))
 	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull PostgreSQL image")
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get PostgreSQL image")
 	}
 
 	// Create container
@@ -100,17 +113,11 @@ func (p *PostgreSQLPlugin) Launch(ctx context.Context, config map[string]interfa
 		zap.String("name", cfg.ContainerName),
 		zap.String("port", cfg.Port))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create PostgreSQL container")
-	}
-	p.containerID = containerID
-
-	// Start container
-	p.logger.Info("starting PostgreSQL container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start PostgreSQL container")
 	}
+	p.containerID = containerID
 
 	// Wait for PostgreSQL to be ready
 	p.logger.Info("waiting for PostgreSQL to be ready")
@@ -124,10 +131,8 @@ func (p *PostgreSQLPlugin) Launch(ctx context.Context, config map[string]interfa
 	if cfg.ScriptsPath != "" {
 		p.logger.Info("executing SQL scripts", zap.String("path", cfg.ScriptsPath))
 		if err := p.executeScripts(ctx, cfg.ScriptsPath); err != nil {
-			// Don't fail if scripts fail, just log the error
-			p.logger.Error("failed to execute SQL scripts",
-				zap.Error(err),
-				zap.String("path", cfg.ScriptsPath))
+			_ = p.Stop(context.Background())
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to execute PostgreSQL scripts")
 		}
 	}
 
@@ -156,7 +161,7 @@ func (p *PostgreSQLPlugin) IsReady(ctx context.Context) (bool, error) {
 
 	// Check if PostgreSQL is ready by executing pg_isready
 	output, err := p.docker.ExecInContainer(ctx, p.containerID, &docker.ExecConfig{
-		Cmd:          []string{"pg_isready", "-U", p.config.User, "-d", p.config.Database},
+		Cmd:          []string{"pg_isready", "-h", "127.0.0.1", "-U", p.config.User, "-d", p.config.Database},
 		AttachStdout: true,
 		AttachStderr: true,
 	})
@@ -195,7 +200,7 @@ func (p *PostgreSQLPlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
-		// Stop all matching containers
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found PostgreSQL container",
@@ -204,10 +209,13 @@ func (p *PostgreSQLPlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -231,6 +239,7 @@ func (p *PostgreSQLPlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("PostgreSQL service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -327,25 +336,13 @@ func (p *PostgreSQLPlugin) parseConfig(config map[string]interface{}) (*PostgreS
 	}
 
 	// Override with provided values
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
 	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
-	if user, ok := config["user"].(string); ok && user != "" {
-		cfg.User = user
-	}
-	if password, ok := config["password"].(string); ok && password != "" {
-		cfg.Password = password
-	}
-	if database, ok := config["database"].(string); ok && database != "" {
-		cfg.Database = database
-	}
-	if scriptsPath, ok := config["scripts-path"].(string); ok && scriptsPath != "" {
-		cfg.ScriptsPath = scriptsPath
-	}
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
-	}
+	cfg.User = svcconfig.String(config, "user", cfg.User)
+	cfg.Password = svcconfig.String(config, "password", cfg.Password)
+	cfg.Database = svcconfig.String(config, "database", cfg.Database)
+	cfg.ScriptsPath = svcconfig.String(config, "scripts-path", cfg.ScriptsPath)
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
 
 	return cfg, nil
 }
@@ -358,6 +355,9 @@ func (p *PostgreSQLPlugin) waitForReady(ctx context.Context) error {
 	for i := 0; i < maxRetries; i++ {
 		ready, err := p.IsReady(ctx)
 		if err != nil {
+			if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+				return err
+			}
 			p.logger.Debug("error checking readiness",
 				zap.Error(err),
 				zap.Int("attempt", i+1))
@@ -424,12 +424,19 @@ func (p *PostgreSQLPlugin) executeScript(ctx context.Context, scriptPath string)
 		return gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to read SQL script")
 	}
 
-	// Execute using psql
+	// Run the file with psql -f: no argument-size limit, psql meta-commands
+	// work, and --single-transaction keeps the all-or-nothing behaviour.
+	name := filepath.Base(scriptPath)
+	if err := p.docker.CopyFileToContainer(ctx, p.containerID, "/tmp", name, content); err != nil {
+		return err
+	}
 	cmd := []string{
 		"psql",
 		"-U", p.config.User,
 		"-d", p.config.Database,
-		"-c", string(content),
+		"-v", "ON_ERROR_STOP=1",
+		"--single-transaction",
+		"-f", "/tmp/" + name,
 	}
 
 	output, err := p.docker.ExecInContainer(ctx, p.containerID, &docker.ExecConfig{

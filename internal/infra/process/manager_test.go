@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"os/exec"
 	"sync"
 	"testing"
 	"time"
@@ -221,4 +222,18 @@ func filepathBase(p string) string {
 		}
 	}
 	return p
+}
+
+func TestStopTerminatesChildProcesses(t *testing.T) {
+	m := NewManager(nil)
+	p, err := m.Start(context.Background(), StartOptions{Command: "sh", Args: []string{"-c", "sleep 317; true"}})
+	require.NoError(t, err)
+
+	alive := func() bool { return exec.Command("pgrep", "-f", "^sleep 317$").Run() == nil }
+	require.Eventually(t, alive, 2*time.Second, 20*time.Millisecond, "child must have started")
+
+	require.NoError(t, m.Stop(p.PID, 2*time.Second))
+
+	assert.Eventually(t, func() bool { return !alive() }, 2*time.Second, 20*time.Millisecond,
+		"stopping the parent must stop its children too")
 }

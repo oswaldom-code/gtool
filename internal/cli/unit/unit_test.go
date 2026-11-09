@@ -9,16 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const sampleGoMod = `module orders
-
-go 1.24.1
-
-require (
-	example.com/acme/shared-lib v1.45.0
-	github.com/onsi/ginkgo/v2 v2.26.0
-)
-`
-
 func TestLoadBuildConfig(t *testing.T) {
 	dir := t.TempDir()
 
@@ -57,11 +47,13 @@ func TestLoadBuildConfig(t *testing.T) {
 	}
 }
 
-func TestResolveSource(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(sampleGoMod), 0o644))
-	t.Chdir(dir)
+var sampleModules = map[string]string{
+	"example.com/acme/shared-lib": "/cache/example.com/acme/shared-lib@v1.45.0",
+	"example.com/acme/search-lib-v2":   "/cache/search-lib-v2@v2.0.0",
+	"github.com/!some!org/business-lib":                  "",
+}
 
+func TestResolveSource(t *testing.T) {
 	modCache := "/home/user/go/pkg/mod"
 
 	tests := []struct {
@@ -74,7 +66,7 @@ func TestResolveSource(t *testing.T) {
 		{
 			name:   "common-lib wildcard",
 			source: "<COMMON-LIB>/messaging/publisher/publisher_interface.go",
-			want:   filepath.Join(modCache, "example.com/acme/shared-lib@v1.45.0", "messaging/publisher/publisher_interface.go"),
+			want:   "/cache/example.com/acme/shared-lib@v1.45.0/messaging/publisher/publisher_interface.go",
 		},
 		{
 			name:   "lib-root wildcard",
@@ -87,16 +79,22 @@ func TestResolveSource(t *testing.T) {
 			want:   "internal/service/foo_interface.go",
 		},
 		{
-			name:        "unknown module",
+			name:        "a longer module name with the same prefix does not match",
 			source:      "<SEARCH-LIB>/foo.go",
 			wantErr:     true,
 			errContains: "search-lib",
+		},
+		{
+			name:        "module in the build list but not downloaded",
+			source:      "<BUSINESS-LIB>/foo.go",
+			wantErr:     true,
+			errContains: "not downloaded",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveSource(tt.source, modCache)
+			got, err := resolveSource(tt.source, modCache, sampleModules)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContains)
@@ -108,12 +106,13 @@ func TestResolveSource(t *testing.T) {
 	}
 }
 
-func TestModuleCachePathNotFound(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(sampleGoMod), 0o644))
-	t.Chdir(dir)
+func TestUsesWildcards(t *testing.T) {
+	assert.False(t, usesWildcards([]mockSpec{{Source: "internal/a.go"}}))
+	assert.True(t, usesWildcards([]mockSpec{{Source: "internal/a.go"}, {Source: "<COMMON-LIB>/b.go"}}))
+}
 
-	_, err := moduleCachePath("nonexistent-library", "/cache")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "nonexistent-library")
+func TestListModules_ParsesTheGoCommand(t *testing.T) {
+	modules, err := listModules()
+	require.NoError(t, err)
+	assert.Contains(t, modules, "github.com/oswaldom-code/gtool", "runs inside this module")
 }

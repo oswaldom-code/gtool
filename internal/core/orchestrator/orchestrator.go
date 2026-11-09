@@ -2,8 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/oswaldom-code/gtool/internal/core/ports"
+	"github.com/oswaldom-code/gtool/internal/core/readiness"
 	"github.com/oswaldom-code/gtool/internal/plugin"
 	"github.com/oswaldom-code/gtool/pkg/config"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
@@ -38,11 +41,12 @@ type Result struct {
 // Orchestrator coordinates the full component-test pipeline: start mocks, start
 // the application, run tests, then tear everything down.
 type Orchestrator struct {
-	config *config.Config
-	mocks  MockManager
-	app    AppManager
-	tests  TestRunner
-	logger *zap.Logger
+	config  *config.Config
+	mocks   MockManager
+	app     AppManager
+	tests   TestRunner
+	logger  *zap.Logger
+	waitApp func(ctx context.Context, url string, timeout time.Duration) error
 }
 
 // NewOrchestrator wires the orchestrator with its phase managers.
@@ -51,11 +55,12 @@ func NewOrchestrator(cfg *config.Config, mocks MockManager, app AppManager, test
 		logger = zap.NewNop()
 	}
 	return &Orchestrator{
-		config: cfg,
-		mocks:  mocks,
-		app:    app,
-		tests:  tests,
-		logger: logger,
+		config:  cfg,
+		mocks:   mocks,
+		app:     app,
+		tests:   tests,
+		logger:  logger,
+		waitApp: readiness.WaitHTTP,
 	}
 }
 
@@ -78,12 +83,22 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 
 	// Phase 2: application
 	appConfig := buildAppConfig(o.config)
+	if appConfig.DockerImage == "" {
+		o.logger.Warn("no app-config.docker-image: tests run against an application started outside gtool")
+	}
 	if appConfig.DockerImage != "" {
 		o.logger.Info("phase: starting application", zap.String("image", appConfig.DockerImage))
 		if err := o.app.Start(ctx, appConfig); err != nil {
 			return res, gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to start application")
 		}
 		res.AppStarted = true
+
+		if url := appHealthURL(o.config); url != "" {
+			o.logger.Info("phase: waiting for application", zap.String("url", url))
+			if err := o.waitApp(ctx, url, startupTimeout(o.config)); err != nil {
+				return res, gtErrors.Wrap(err, gtErrors.ErrServiceNotReady, "application did not become ready")
+			}
+		}
 	}
 
 	// Phase 3: tests
@@ -106,7 +121,7 @@ func (o *Orchestrator) cleanup(res *Result) {
 
 	if res.AppStarted {
 		o.logger.Info("cleanup: stopping application")
-		if err := o.app.Stop(cleanupCtx); err != nil {
+		if err := o.app.Stop(cleanupCtx); err != nil && !gtErrors.Is(err, gtErrors.ErrServiceNotRunning) {
 			o.logger.Error("failed to stop application during cleanup", zap.Error(err))
 		}
 	}
@@ -130,6 +145,27 @@ func buildServiceConfigs(cfg *config.Config) map[string]map[string]interface{} {
 		out[name] = m
 	}
 	return out
+}
+
+// appHealthURL is where the app is polled before tests run, or "" when it is
+// not published on the host.
+func appHealthURL(cfg *config.Config) string {
+	hostPort := ports.AppHostPort(cfg)
+	if cfg.AppConfig.Port <= 0 || hostPort <= 0 {
+		return ""
+	}
+	path := cfg.AppConfig.HealthPath
+	if path == "" {
+		path = "/"
+	}
+	return fmt.Sprintf("http://localhost:%d%s", hostPort, path)
+}
+
+func startupTimeout(cfg *config.Config) time.Duration {
+	if cfg.Orchestration.StartupTimeout > 0 {
+		return cfg.Orchestration.StartupTimeout
+	}
+	return config.DefaultConfig().Orchestration.StartupTimeout
 }
 
 // buildAppConfig maps the file configuration to a plugin.AppConfig.

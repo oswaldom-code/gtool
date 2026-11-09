@@ -111,6 +111,27 @@ func TestDockerManager_Start(t *testing.T) {
 		assert.True(t, gtErrors.Is(err, gtErrors.ErrInvalidArgument))
 	})
 
+	t.Run("replaces an exited container instead of refusing to start", func(t *testing.T) {
+		d := &fakeDocker{containers: []types.Container{{ID: "old", State: "exited"}}}
+		m := NewDockerManager(d, nil)
+
+		err := m.Start(ctx, &plugin.AppConfig{DockerImage: "myapp:latest", Port: 8080})
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"old"}, d.removed)
+		assert.Equal(t, "container-id", d.startedID)
+	})
+
+	t.Run("fails when an exited container cannot be removed", func(t *testing.T) {
+		d := &fakeDocker{containers: []types.Container{{ID: "old", State: "exited"}}, removeErr: errors.New("busy")}
+		m := NewDockerManager(d, nil)
+
+		err := m.Start(ctx, &plugin.AppConfig{DockerImage: "myapp:latest"})
+
+		require.Error(t, err)
+		assert.True(t, gtErrors.Is(err, gtErrors.ErrDockerFailed))
+	})
+
 	t.Run("fails when already running", func(t *testing.T) {
 		d := &fakeDocker{containers: []types.Container{{ID: "x", State: "running"}}}
 		m := NewDockerManager(d, nil)

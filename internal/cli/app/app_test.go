@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	coreApp "github.com/oswaldom-code/gtool/internal/core/app"
+	"github.com/oswaldom-code/gtool/internal/core/ports"
 	"github.com/oswaldom-code/gtool/internal/plugin"
 	"github.com/oswaldom-code/gtool/pkg/config"
 )
@@ -180,6 +181,7 @@ func TestBuildAppConfig_FlagOverrides(t *testing.T) {
 	appPort = 2000
 	appEnv = map[string]string{"B": "2"}
 
+	applyFlagOverrides(cfg)
 	ac := buildAppConfig(cfg)
 
 	assert.Equal(t, "override:2", ac.DockerImage)
@@ -199,7 +201,25 @@ func TestBuildAppConfig_HostPort(t *testing.T) {
 	assert.Equal(t, 18080, buildAppConfig(cfg).HostPort)
 
 	appPort = 9090
+	applyFlagOverrides(cfg)
 	ac := buildAppConfig(cfg)
 	assert.Equal(t, 9090, ac.Port)
 	assert.Equal(t, 18080, ac.HostPort, "explicit host-port wins over --port")
+}
+
+func TestApplyFlagOverrides_FeedPlaceholders(t *testing.T) {
+	t.Cleanup(func() { dockerImage = ""; appPort = 0; appEnv = nil })
+
+	cfg := config.DefaultConfig()
+	cfg.AppConfig.Port = 8080
+	cfg.AppConfig.Environment = map[string]string{"PORT": "${app.port}"}
+	appPort = 9090
+	appEnv = map[string]string{"SELF": "http://localhost:${app.host-port}"}
+
+	applyFlagOverrides(cfg)
+	_, err := ports.Resolve(cfg, ports.NoAuto)
+
+	require.NoError(t, err)
+	assert.Equal(t, "9090", cfg.AppConfig.Environment["PORT"], "${app.port} must see --port")
+	assert.Equal(t, "http://localhost:9090", cfg.AppConfig.Environment["SELF"], "--env values are interpolated too")
 }

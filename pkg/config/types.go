@@ -15,11 +15,14 @@ type Config struct {
 }
 
 type AppConfig struct {
-	BinaryName  string            `yaml:"binary-name" json:"binary-name"`
-	BinaryPath  string            `yaml:"binary-path" json:"binary-path"`
-	DockerImage string            `yaml:"docker-image" json:"docker-image"`
-	Port        int               `yaml:"port" json:"port"`
-	HostPort    string            `yaml:"host-port" json:"host-port"`
+	BinaryName  string `yaml:"binary-name" json:"binary-name"`
+	BinaryPath  string `yaml:"binary-path" json:"binary-path"`
+	DockerImage string `yaml:"docker-image" json:"docker-image"`
+	Port        int    `yaml:"port" json:"port"`
+	HostPort    string `yaml:"host-port" json:"host-port"`
+	// HealthPath is the HTTP path polled until the app answers before tests
+	// run (any status counts as ready). Defaults to "/".
+	HealthPath  string            `yaml:"health-path" json:"health-path"`
 	Environment map[string]string `yaml:"environment" json:"environment"`
 }
 
@@ -41,14 +44,10 @@ type OrchestrationConfig struct {
 	HealthCheckInterval time.Duration `yaml:"health-check-interval" json:"health-check-interval"`
 	HealthCheckRetries  int           `yaml:"health-check-retries" json:"health-check-retries"`
 	CleanupOnFailure    bool          `yaml:"cleanup-on-failure" json:"cleanup-on-failure"`
-	PreserveLogs        bool          `yaml:"preserve-logs" json:"preserve-logs"`
 }
 
 type ObservabilityConfig struct {
-	StructuredLogs bool   `yaml:"structured-logs" json:"structured-logs"`
-	LogLevel       string `yaml:"log-level" json:"log-level"`
-	MetricsEnabled bool   `yaml:"metrics-enabled" json:"metrics-enabled"`
-	ReportFormat   string `yaml:"report-format" json:"report-format"`
+	LogLevel string `yaml:"log-level" json:"log-level"`
 }
 
 // StressConfig drives `gtool stress`: which targets to hit, how to ramp the
@@ -120,13 +119,9 @@ func DefaultConfig() *Config {
 			HealthCheckInterval: 3 * time.Second,
 			HealthCheckRetries:  60,
 			CleanupOnFailure:    true,
-			PreserveLogs:        true,
 		},
 		Observability: ObservabilityConfig{
-			StructuredLogs: false,
-			LogLevel:       "info",
-			MetricsEnabled: true,
-			ReportFormat:   "text",
+			LogLevel: "info",
 		},
 	}
 }

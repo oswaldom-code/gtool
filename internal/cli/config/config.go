@@ -8,7 +8,9 @@ import (
 	"gopkg.in/yaml.v3"
 
 	coreConfig "github.com/oswaldom-code/gtool/internal/core/config"
+	"github.com/oswaldom-code/gtool/internal/infra/termout"
 	"github.com/oswaldom-code/gtool/pkg/config"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 // NewConfigCmd creates the config command
@@ -44,19 +46,17 @@ func newConfigValidateCmd(configFile *string) *cobra.Command {
 			}
 
 			if err != nil {
-				fmt.Printf("❌ Failed to load configuration: %v\n", err)
 				return err
 			}
 
-			fmt.Printf("✓ Configuration loaded successfully\n")
+			termout.Printf("✓ Configuration loaded successfully\n")
 
 			validator := coreConfig.NewValidator()
 			if err := validator.Validate(cfg); err != nil {
-				fmt.Printf("❌ Validation failed:\n%v\n", err)
 				return err
 			}
 
-			fmt.Printf("✓ Configuration is valid\n")
+			termout.Printf("✓ Configuration is valid\n")
 			fmt.Printf("\nSummary:\n")
 			fmt.Printf("  Version: %s\n", cfg.Version)
 			fmt.Printf("  Technology: %s\n", cfg.AppTechnology)
@@ -88,7 +88,6 @@ func newConfigShowCmd(configFile *string) *cobra.Command {
 			}
 
 			if err != nil {
-				fmt.Printf("Failed to load configuration: %v\n", err)
 				return err
 			}
 
@@ -97,22 +96,23 @@ func newConfigShowCmd(configFile *string) *cobra.Command {
 			switch format {
 			case "json":
 				output, err = json.MarshalIndent(cfg, "", "  ")
-			case "yml":
+			case "yml", "yaml":
 				output, err = yaml.Marshal(cfg)
 			default:
-				return fmt.Errorf("unsupported format: %s (use 'json' or 'yml')", format)
+				return gtErrors.New(gtErrors.ErrInvalidArgument,
+					fmt.Sprintf("unsupported format: %s (use 'yml', 'yaml' or 'json')", format))
 			}
 
 			if err != nil {
-				return fmt.Errorf("failed to marshal configuration: %w", err)
+				return gtErrors.Wrap(err, gtErrors.ErrConfigInvalid, "failed to marshal configuration")
 			}
 
-			fmt.Println(string(output))
+			fmt.Fprintln(cmd.OutOrStdout(), string(output))
 			return nil
 		},
 	}
 
-	cmd.Flags().StringP("format", "f", "yml", "output format (yml or json)")
+	cmd.Flags().StringP("format", "f", "yml", "output format (yml, yaml or json)")
 
 	return cmd
 }

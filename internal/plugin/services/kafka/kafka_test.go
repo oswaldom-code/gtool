@@ -61,14 +61,14 @@ func TestParseConfig(t *testing.T) {
 			wantPartitions: defaultPartitions,
 		},
 		{
-			name: "topics list ignores non-string and empty entries",
+			name: "topics list keeps numeric names and skips empty entries",
 			input: map[string]interface{}{
 				"topics": []interface{}{"orders", "", 42, "events"},
 			},
 			wantImage:      defaultImage,
 			wantPort:       defaultPort,
 			wantPartitions: defaultPartitions,
-			wantTopics:     []string{"orders", "events"},
+			wantTopics:     []string{"orders", "42", "events"},
 		},
 		{
 			name: "zero partitions falls back to default",

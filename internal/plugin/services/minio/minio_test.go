@@ -2,6 +2,9 @@ package minio
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -195,12 +198,14 @@ func TestGetConnectionInfo(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, got)
 			assert.Equal(t, "localhost", got.Host)
-			assert.Equal(t, mustParsePort(tt.config.Port), got.Port)
+			wantPort, err := strconv.Atoi(tt.config.Port)
+			require.NoError(t, err)
+			assert.Equal(t, wantPort, got.Port)
 			assert.Equal(t, "s3", got.Protocol)
-			assert.Equal(t, tt.config.AccessKey, got.Metadata["accessKey"])
-			assert.Equal(t, tt.config.SecretKey, got.Metadata["secretKey"])
+			assert.Equal(t, tt.config.AccessKey, got.Metadata["user"])
+			assert.Equal(t, tt.config.SecretKey, got.Metadata["password"])
 			assert.Equal(t, "http://localhost:"+tt.config.Port, got.Metadata["endpoint"])
-			assert.Equal(t, tt.config.ConsolePort, got.Metadata["consolePort"])
+			assert.Equal(t, tt.config.ConsolePort, got.Metadata["console-port"])
 		})
 	}
 }
@@ -252,4 +257,40 @@ func TestStop_NoContainer(t *testing.T) {
 	// Should not error when no container to stop
 	err := plugin.Stop(context.TODO())
 	assert.NoError(t, err)
+}
+
+func TestProbeLive(t *testing.T) {
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/minio/health/live", r.URL.Path)
+	}))
+	defer ok.Close()
+	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer unavailable.Close()
+
+	assert.True(t, probeLive(context.Background(), ok.URL+"/minio/health/live"))
+	assert.False(t, probeLive(context.Background(), unavailable.URL+"/minio/health/live"))
+	assert.False(t, probeLive(context.Background(), "http://127.0.0.1:1/minio/health/live"))
+	assert.False(t, probeLive(context.Background(), "http://bad host/"))
+}
+
+func TestHealthURL(t *testing.T) {
+	p := NewMinIOPlugin(nil, nil)
+	p.config = &MinIOConfig{Port: "19000"}
+	assert.Equal(t, "http://localhost:19000/minio/health/live", p.healthURL())
+}
+
+func TestParseConfig_CanonicalCredentials(t *testing.T) {
+	p := NewMinIOPlugin(nil, nil)
+
+	canonical, err := p.parseConfig(map[string]interface{}{"user": "u1", "password": "p1"})
+	require.NoError(t, err)
+	assert.Equal(t, "u1", canonical.AccessKey)
+	assert.Equal(t, "p1", canonical.SecretKey)
+
+	legacy, err := p.parseConfig(map[string]interface{}{"access-key": "u2", "secret-key": "p2"})
+	require.NoError(t, err)
+	assert.Equal(t, "u2", legacy.AccessKey, "access-key stays accepted as an alias")
+	assert.Equal(t, "p2", legacy.SecretKey)
 }

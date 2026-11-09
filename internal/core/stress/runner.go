@@ -3,13 +3,13 @@ package stress
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/oswaldom-code/gtool/internal/core/ports"
+	"github.com/oswaldom-code/gtool/internal/core/readiness"
 	"github.com/oswaldom-code/gtool/internal/plugin"
 	"github.com/oswaldom-code/gtool/pkg/config"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
@@ -18,9 +18,6 @@ import (
 const (
 	// DefaultReportsPath is used when stress-config.reports-path is empty.
 	DefaultReportsPath = "test/stress/reports"
-
-	readinessPollInterval = 500 * time.Millisecond
-	readinessProbeTimeout = 2 * time.Second
 )
 
 // Outcome is the result of the last stress run.
@@ -70,33 +67,6 @@ func (r *Runner) baseURL(cfg *config.Config) string {
 	return fmt.Sprintf("http://localhost:%d", ports.AppHostPort(cfg))
 }
 
-// waitReady polls the base URL until it answers with any HTTP status. A
-// published container port accepts connections before the app listens, so
-// a TCP check is not enough.
-func waitReady(ctx context.Context, baseURL string, timeout time.Duration) error {
-	client := &http.Client{Timeout: readinessProbeTimeout}
-	deadline := time.Now().Add(timeout)
-	for {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/", nil)
-		if err != nil {
-			return gtErrors.Wrap(err, gtErrors.ErrInvalidArgument, fmt.Sprintf("invalid target URL %s", baseURL))
-		}
-		resp, err := client.Do(req)
-		if err == nil {
-			_ = resp.Body.Close()
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return gtErrors.Wrap(err, gtErrors.ErrServiceNotReady, fmt.Sprintf("target %s not reachable after %s", baseURL, timeout))
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(readinessPollInterval):
-		}
-	}
-}
-
 func reportsPath(sc *config.StressConfig) string {
 	if sc.ReportsPath == "" {
 		return DefaultReportsPath
@@ -120,7 +90,7 @@ func (r *Runner) Run(ctx context.Context, cfg *config.Config) (*plugin.TestResul
 
 	baseURL := r.baseURL(cfg)
 	r.logger.Info("waiting for target", zap.String("url", baseURL))
-	if err := waitReady(ctx, baseURL, cfg.Orchestration.StartupTimeout); err != nil {
+	if err := readiness.WaitHTTP(ctx, baseURL+"/", cfg.Orchestration.StartupTimeout); err != nil {
 		return nil, err
 	}
 

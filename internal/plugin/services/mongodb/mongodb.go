@@ -21,6 +21,19 @@ const (
 	containerNamePrefix = "gtool-mongodb"
 )
 
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "port", "database", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"port": defaultPort,
+	}
+}
+
 // MongoDBPlugin implements the ServicePlugin interface for MongoDB
 type MongoDBPlugin struct {
 	docker      *docker.Client
@@ -66,9 +79,9 @@ func (p *MongoDBPlugin) Launch(ctx context.Context, config map[string]interface{
 	p.config = cfg
 
 	// Pull image
-	p.logger.Info("pulling MongoDB image", zap.String("image", cfg.Image))
+	p.logger.Info("ensuring MongoDB image", zap.String("image", cfg.Image))
 	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull MongoDB image")
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get MongoDB image")
 	}
 
 	// Create container
@@ -88,17 +101,11 @@ func (p *MongoDBPlugin) Launch(ctx context.Context, config map[string]interface{
 		zap.String("name", cfg.ContainerName),
 		zap.String("port", cfg.Port))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create MongoDB container")
-	}
-	p.containerID = containerID
-
-	// Start container
-	p.logger.Info("starting MongoDB container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start MongoDB container")
 	}
+	p.containerID = containerID
 
 	// Wait for MongoDB to be ready
 	p.logger.Info("waiting for MongoDB to be ready")
@@ -172,7 +179,7 @@ func (p *MongoDBPlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
-		// Stop all matching containers
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found MongoDB container",
@@ -181,10 +188,13 @@ func (p *MongoDBPlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -208,6 +218,7 @@ func (p *MongoDBPlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("MongoDB service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -222,8 +233,8 @@ func (p *MongoDBPlugin) GetConnectionInfo() (*plugin.ConnectionInfo, error) {
 		Port:     mustParsePort(p.config.Port),
 		Protocol: "mongodb",
 		Metadata: map[string]string{
-			"database":         p.config.Database,
-			"connectionString": fmt.Sprintf("mongodb://localhost:%s", p.config.Port),
+			"database":          p.config.Database,
+			"connection-string": fmt.Sprintf("mongodb://localhost:%s", p.config.Port),
 		},
 	}, nil
 }
@@ -300,16 +311,10 @@ func (p *MongoDBPlugin) parseConfig(config map[string]interface{}) (*MongoDBConf
 	}
 
 	// Override with provided values
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
 	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
-	if database, ok := config["database"].(string); ok && database != "" {
-		cfg.Database = database
-	}
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
-	}
+	cfg.Database = svcconfig.String(config, "database", cfg.Database)
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
 
 	return cfg, nil
 }
@@ -322,6 +327,9 @@ func (p *MongoDBPlugin) waitForReady(ctx context.Context) error {
 	for i := 0; i < maxRetries; i++ {
 		ready, err := p.IsReady(ctx)
 		if err != nil {
+			if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+				return err
+			}
 			p.logger.Debug("error checking readiness",
 				zap.Error(err),
 				zap.Int("attempt", i+1))

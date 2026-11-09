@@ -3,13 +3,18 @@ package nativeapp
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 type startCall struct {
@@ -21,6 +26,7 @@ type startCall struct {
 type fakeRunner struct {
 	started []startCall
 	stopped []string
+	stopErr error
 }
 
 func (f *fakeRunner) start(path string, args, env []string) error {
@@ -28,9 +34,9 @@ func (f *fakeRunner) start(path string, args, env []string) error {
 	return nil
 }
 
-func (f *fakeRunner) stopByName(name string) error {
-	f.stopped = append(f.stopped, name)
-	return nil
+func (f *fakeRunner) stop(path string) error {
+	f.stopped = append(f.stopped, filepath.Base(path))
+	return f.stopErr
 }
 
 const buildCfg = `build:
@@ -132,11 +138,70 @@ func TestWaitForAppReadyWhenPortAccepts(t *testing.T) {
 	assert.GreaterOrEqual(t, calls, 3)
 }
 
-func TestWaitForAppProceedsOnTimeout(t *testing.T) {
+func TestWaitForAppFailsOnTimeout(t *testing.T) {
 	l, _, _ := newTestLauncher(t)
 	l.readyTimeout = 50 * time.Millisecond
 	l.dial = func(string) error { return assert.AnError } // never ready
 
-	// Proceeds (no error) even though the app never came up.
-	require.NoError(t, l.waitForApp(context.Background()))
+	err := l.waitForApp(context.Background())
+
+	require.Error(t, err)
+	assert.True(t, gtErrors.Is(err, gtErrors.ErrServiceNotReady), "tests must not run against an app that never came up")
+}
+
+func TestStartFailsWhenPreviousInstanceCannotBeStopped(t *testing.T) {
+	l, fr, gobin := newTestLauncher(t)
+	require.NoError(t, os.WriteFile(filepath.Join(gobin, "orders-api"), []byte("#!/bin/sh\n"), 0o755))
+	fr.stopErr = assert.AnError
+
+	err := l.Start(context.Background())
+
+	require.Error(t, err)
+	assert.Empty(t, fr.started)
+}
+
+func TestCommandPattern(t *testing.T) {
+	re := regexp.MustCompile(commandPattern("/home/u/go/bin/orders-api"))
+
+	for _, cmdline := range []string{
+		"/home/u/go/bin/orders-api",
+		"/home/u/go/bin/orders-api --port 8080",
+	} {
+		assert.True(t, re.MatchString(cmdline), cmdline)
+	}
+	for _, cmdline := range []string{
+		"vim /home/u/go/bin/orders-api",
+		"tail -f orders-api.log",
+		"go build -o /home/u/go/bin/orders-api ./cmd/server",
+		"/home/u/go/bin/orders-api-worker --port 8081",
+		"/home/u/goXbin/orders-api",
+	} {
+		assert.False(t, re.MatchString(cmdline), cmdline)
+	}
+}
+
+// TestOSRunnerStopsOnlyTheExactBinary runs real processes: a script started
+// by path is stopped, a same-named process started differently survives.
+func TestOSRunnerStopsOnlyTheExactBinary(t *testing.T) {
+	if _, err := exec.LookPath("pkill"); err != nil {
+		t.Skip("pkill not available")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "orders-api")
+	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755))
+
+	bystander := exec.Command("sh", "-c", "exec -a 'tail -f "+bin+".log' sleep 30")
+	require.NoError(t, bystander.Start())
+	t.Cleanup(func() { _ = bystander.Process.Kill(); _ = bystander.Wait() })
+
+	r := &osRunner{}
+	require.NoError(t, r.start(bin, []string{"--port", "8080"}, os.Environ()))
+
+	require.NoError(t, r.stop(bin))
+
+	alive, err := pgrepLike("pgrep", "-f", commandPattern(bin))
+	require.NoError(t, err)
+	assert.False(t, alive, "the launched binary must be gone when stop returns")
+	assert.NoError(t, bystander.Process.Signal(syscall.Signal(0)), "an unrelated process mentioning the name must survive")
+	assert.NoError(t, r.stop(bin), "stopping when nothing runs is a no-op")
 }

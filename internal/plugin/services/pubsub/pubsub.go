@@ -23,6 +23,19 @@ const (
 	containerNamePrefix = "gtool-pubsub"
 )
 
+// ConfigKeys lists every mock-config key the plugin accepts (aliases included).
+func ConfigKeys() []string {
+	return []string{"image", "port", "project-id", "topics", "subscriptions", "container-name"}
+}
+
+// DefaultPorts returns the host port used for each port key when the config
+// does not set it.
+func DefaultPorts() map[string]string {
+	return map[string]string{
+		"port": defaultPort,
+	}
+}
+
 // PubSubPlugin implements the ServicePlugin interface for the Google Cloud
 // Pub/Sub emulator.
 type PubSubPlugin struct {
@@ -77,9 +90,9 @@ func (p *PubSubPlugin) Launch(ctx context.Context, config map[string]interface{}
 	}
 	p.config = cfg
 
-	p.logger.Info("pulling Pub/Sub image", zap.String("image", cfg.Image))
+	p.logger.Info("ensuring Pub/Sub image", zap.String("image", cfg.Image))
 	if err := p.docker.EnsureImage(ctx, cfg.Image); err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to pull Pub/Sub image")
+		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to get Pub/Sub image")
 	}
 
 	containerConfig := &docker.ContainerConfig{
@@ -103,16 +116,11 @@ func (p *PubSubPlugin) Launch(ctx context.Context, config map[string]interface{}
 		zap.String("name", cfg.ContainerName),
 		zap.String("port", cfg.Port))
 
-	containerID, err := p.docker.CreateContainer(ctx, containerConfig)
+	containerID, err := p.docker.RunContainer(ctx, containerConfig)
 	if err != nil {
-		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to create Pub/Sub container")
-	}
-	p.containerID = containerID
-
-	p.logger.Info("starting Pub/Sub container", zap.String("containerID", containerID))
-	if err := p.docker.StartContainer(ctx, containerID); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrDockerFailed, "failed to start Pub/Sub container")
 	}
+	p.containerID = containerID
 
 	p.logger.Info("waiting for Pub/Sub emulator to be ready")
 	if err := p.waitForReady(ctx); err != nil {
@@ -125,13 +133,15 @@ func (p *PubSubPlugin) Launch(ctx context.Context, config map[string]interface{}
 	if len(cfg.Topics) > 0 {
 		p.logger.Info("creating topics", zap.Strings("topics", cfg.Topics))
 		if err := p.createTopics(ctx, cfg); err != nil {
-			p.logger.Error("failed to create topics", zap.Error(err))
+			_ = p.Stop(context.Background())
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to create Pub/Sub topics")
 		}
 	}
 	if len(cfg.Subscriptions) > 0 {
 		p.logger.Info("creating subscriptions", zap.Int("count", len(cfg.Subscriptions)))
 		if err := p.createSubscriptions(ctx, cfg); err != nil {
-			p.logger.Error("failed to create subscriptions", zap.Error(err))
+			_ = p.Stop(context.Background())
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to create Pub/Sub subscriptions")
 		}
 	}
 
@@ -197,6 +207,7 @@ func (p *PubSubPlugin) Stop(ctx context.Context) error {
 			return nil
 		}
 
+		var firstErr error
 		for _, container := range containers {
 			p.containerID = container.ID
 			p.logger.Info("found Pub/Sub container",
@@ -205,10 +216,13 @@ func (p *PubSubPlugin) Stop(ctx context.Context) error {
 
 			if err := p.stopContainer(ctx); err != nil {
 				p.logger.Error("failed to stop container", zap.Error(err), zap.String("containerID", container.ID))
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 
-		return nil
+		return firstErr
 	}
 
 	return p.stopContainer(ctx)
@@ -230,6 +244,7 @@ func (p *PubSubPlugin) stopContainer(ctx context.Context) error {
 
 	p.logger.Info("Pub/Sub service stopped successfully")
 	p.containerID = ""
+	p.config = nil
 	return nil
 }
 
@@ -316,34 +331,22 @@ func (p *PubSubPlugin) parseConfig(config map[string]interface{}) (*PubSubConfig
 		ContainerName: fmt.Sprintf("%s-%d", containerNamePrefix, time.Now().Unix()),
 	}
 
-	if image, ok := config["image"].(string); ok && image != "" {
-		cfg.Image = image
-	}
+	cfg.Image = svcconfig.String(config, "image", cfg.Image)
 	cfg.Port = svcconfig.Port(config, "port", cfg.Port)
-	if projectID, ok := config["project-id"].(string); ok && projectID != "" {
-		cfg.ProjectID = projectID
-	}
-	if topics, ok := config["topics"].([]interface{}); ok {
-		for _, t := range topics {
-			if name, ok := t.(string); ok && name != "" {
-				cfg.Topics = append(cfg.Topics, name)
-			}
-		}
-	}
+	cfg.ProjectID = svcconfig.String(config, "project-id", cfg.ProjectID)
+	cfg.Topics = append(cfg.Topics, svcconfig.Strings(config, "topics")...)
 	if subs, ok := config["subscriptions"].([]interface{}); ok {
 		for _, s := range subs {
 			if m, ok := s.(map[string]interface{}); ok {
-				name, _ := m["name"].(string)
-				topic, _ := m["topic"].(string)
+				name := svcconfig.String(m, "name", "")
+				topic := svcconfig.String(m, "topic", "")
 				if name != "" && topic != "" {
 					cfg.Subscriptions = append(cfg.Subscriptions, SubscriptionConfig{Name: name, Topic: topic})
 				}
 			}
 		}
 	}
-	if containerName, ok := config["container-name"].(string); ok && containerName != "" {
-		cfg.ContainerName = containerName
-	}
+	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
 
 	return cfg, nil
 }
@@ -356,6 +359,9 @@ func (p *PubSubPlugin) waitForReady(ctx context.Context) error {
 	for i := 0; i < maxRetries; i++ {
 		ready, err := p.IsReady(ctx)
 		if err != nil {
+			if gtErrors.Is(err, gtErrors.ErrContainerExited) {
+				return err
+			}
 			p.logger.Debug("error checking readiness",
 				zap.Error(err),
 				zap.Int("attempt", i+1))

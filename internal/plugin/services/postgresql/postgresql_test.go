@@ -2,6 +2,7 @@ package postgresql
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -195,7 +196,9 @@ func TestGetConnectionInfo(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, got)
 			assert.Equal(t, "localhost", got.Host)
-			assert.Equal(t, mustParsePort(tt.config.Port), got.Port)
+			wantPort, err := strconv.Atoi(tt.config.Port)
+			require.NoError(t, err)
+			assert.Equal(t, wantPort, got.Port)
 			assert.Equal(t, "postgresql", got.Protocol)
 			assert.Equal(t, tt.config.User, got.Metadata["user"])
 			assert.Equal(t, tt.config.Password, got.Metadata["password"])

@@ -37,7 +37,7 @@ func TestCouchbaseIntegration(t *testing.T) {
 	config := map[string]interface{}{
 		"image":      defaultImage,
 		"admin-port": "18091",
-		"data-port":  "21210",
+		"data-port":  "11210",
 		"bucket":     "orders",
 	}
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/oswaldom-code/gtool/internal/infra/docker"
 	"github.com/oswaldom-code/gtool/pkg/config"
+	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
 // fakeDocker records interactions and lets tests drive readiness.
@@ -23,6 +24,8 @@ type fakeDocker struct {
 	removed   []string
 	logs      string
 	ensureErr error
+	foreign   map[string]bool
+	labels    map[string]map[string]string
 }
 
 func (f *fakeDocker) EnsureImage(_ context.Context, _ string) error { return f.ensureErr }
@@ -37,7 +40,14 @@ func (f *fakeDocker) StartContainer(_ context.Context, id string) error {
 func (f *fakeDocker) GetContainerLogs(_ context.Context, _ string, _ int) (string, error) {
 	return f.logs, nil
 }
-func (f *fakeDocker) RemoveContainerByName(_ context.Context, name string) (bool, error) {
+func (f *fakeDocker) RemoveContainerByName(_ context.Context, name string, labels map[string]string) (bool, error) {
+	if f.labels == nil {
+		f.labels = map[string]map[string]string{}
+	}
+	f.labels[name] = labels
+	if f.foreign[name] {
+		return false, gtErrors.New(gtErrors.ErrContainerForeign, "not ours")
+	}
 	f.removed = append(f.removed, name)
 	return true, nil
 }
@@ -104,10 +114,15 @@ func TestParsePubsubErrors(t *testing.T) {
 	}
 }
 
-func TestContainsAll(t *testing.T) {
-	assert.True(t, containsAll("abc ready def done", []string{"ready", "done"}))
-	assert.False(t, containsAll("abc ready", []string{"ready", "done"}))
-	assert.True(t, containsAll("anything", nil))
+func TestContainsInOrder(t *testing.T) {
+	assert.True(t, containsInOrder("abc ready def done", []string{"ready", "done"}))
+	assert.False(t, containsInOrder("abc ready", []string{"ready", "done"}))
+	assert.True(t, containsInOrder("anything", nil))
+
+	initPhase := "database system is ready to accept connections\nPostgreSQL init process complete; ready for start up\n"
+	needles := []string{"PostgreSQL init process complete; ready for start up", "database system is ready to accept connections"}
+	assert.False(t, containsInOrder(initPhase, needles), "the temporary init server's ready line must not count")
+	assert.True(t, containsInOrder(initPhase+"database system is ready to accept connections\n", needles))
 }
 
 func TestUpLaunchesPubsubWithPublicImage(t *testing.T) {
@@ -167,4 +182,31 @@ func TestDownRemovesContainers(t *testing.T) {
 	l := &Launcher{docker: fd, logger: zap.NewNop()}
 	require.NoError(t, l.Down(context.Background(), []string{"pubsub", "postgresql"}))
 	assert.Equal(t, []string{"pubsub", "postgresql"}, fd.removed)
+	assert.Equal(t, map[string]string{"managed-by": "gtool", "gtool-stable-mock": "pubsub"}, fd.labels["pubsub"],
+		"removal must be restricted to gtool's stable mock containers")
+}
+
+func TestDownSkipsForeignContainers(t *testing.T) {
+	fd := &fakeDocker{foreign: map[string]bool{"postgresql": true}}
+	l := &Launcher{docker: fd, logger: zap.NewNop()}
+
+	require.NoError(t, l.Down(context.Background(), []string{"postgresql", "pubsub"}))
+
+	assert.Equal(t, []string{"pubsub"}, fd.removed, "a user's own container named postgresql is left alone")
+}
+
+func TestUpFailsOnForeignContainer(t *testing.T) {
+	fd := &fakeDocker{foreign: map[string]bool{"pubsub": true}}
+	l := &Launcher{docker: fd, logger: zap.NewNop(), mocksDataPath: t.TempDir()}
+
+	cfg := &config.Config{}
+	cfg.ThirdParty.MockConfig = map[string]interface{}{
+		"pubsub": mockConfig(t, "project-id: p1\ntopics:\n  - topic-id: t1\n"),
+	}
+
+	err := l.Up(context.Background(), []string{"pubsub"}, cfg)
+
+	require.Error(t, err)
+	assert.True(t, gtErrors.Is(err, gtErrors.ErrContainerForeign), err.Error())
+	assert.Empty(t, fd.created)
 }

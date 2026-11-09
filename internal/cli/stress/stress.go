@@ -52,7 +52,7 @@ type deps struct {
 // defaultPipeline wires the real mock and app managers with the stress runner
 // as the test phase, so mocks and app are always torn down.
 func defaultPipeline(cfg *config.Config, tests orchestrator.TestRunner, log *zap.Logger) (pipeline, func() error, error) {
-	dockerClient, err := docker.NewClient(log)
+	dockerClient, err := docker.NewRunClient(log)
 	if err != nil {
 		return nil, nil, gtErrors.Wrap(err, gtErrors.ErrDockerConnection, "failed to create Docker client")
 	}

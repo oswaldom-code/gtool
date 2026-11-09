@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -70,6 +71,18 @@ func TestParseConfig(t *testing.T) {
 			want: &RedisConfig{
 				Image: defaultImage,
 				Port:  "6380",
+			},
+			wantErr: false,
+		},
+		{
+			name: "unquoted numeric password is kept",
+			input: map[string]interface{}{
+				"password": 123456,
+			},
+			want: &RedisConfig{
+				Image:    defaultImage,
+				Port:     defaultPort,
+				Password: "123456",
 			},
 			wantErr: false,
 		},
@@ -179,7 +192,9 @@ func TestGetConnectionInfo(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, got)
 			assert.Equal(t, "localhost", got.Host)
-			assert.Equal(t, mustParsePort(tt.config.Port), got.Port)
+			wantPort, err := strconv.Atoi(tt.config.Port)
+			require.NoError(t, err)
+			assert.Equal(t, wantPort, got.Port)
 			assert.Equal(t, "redis", got.Protocol)
 			assert.Equal(t, tt.config.Password, got.Metadata["password"])
 		})

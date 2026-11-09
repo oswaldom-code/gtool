@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
+	"github.com/oswaldom-code/gtool/internal/infra/termout"
 	gtErrors "github.com/oswaldom-code/gtool/pkg/errors"
 )
 
@@ -35,13 +37,16 @@ const (
 	readyTimeout = 30 * time.Second
 	readyPoll    = 300 * time.Millisecond
 
+	stopTimeout = 5 * time.Second
+	stopPoll    = 100 * time.Millisecond
+
 	defaultBuildConfig = "build-config.yml"
 )
 
 // runner abstracts process start/stop so tests don't spawn real processes.
 type runner interface {
 	start(binaryPath string, args []string, env []string) error
-	stopByName(name string) error
+	stop(binaryPath string) error
 }
 
 // Launcher starts and stops the native app binaries.
@@ -93,11 +98,14 @@ func (l *Launcher) Start(ctx context.Context) error {
 		binPath := filepath.Join(l.gobin, name)
 		if _, statErr := os.Stat(binPath); statErr != nil {
 			return gtErrors.New(gtErrors.ErrProcessFailed,
-				fmt.Sprintf("binary %s not found (build it first, e.g. go build -o %s)", binPath, binPath))
+				fmt.Sprintf("binary %s not found: build the build-config binaries into %s first (e.g. go build -o %s ./<cmd package>)",
+					binPath, l.gobin, binPath))
 		}
 
-		// Replace any previously running instance, like the legacy "pkill" step.
-		_ = l.run.stopByName(name)
+		if err := l.run.stop(binPath); err != nil {
+			return gtErrors.Wrap(err, gtErrors.ErrProcessFailed,
+				fmt.Sprintf("failed to stop the previous %s", name))
+		}
 
 		port := basePort + i
 		extraPort := baseExtraPort + i
@@ -107,7 +115,7 @@ func (l *Launcher) Start(ctx context.Context) error {
 			"STORAGE_EMULATOR_HOST="+storageEmulatorHost,
 		)
 
-		fmt.Printf("🚀 Starting %s on port %d...\n", name, port)
+		termout.Printf("🚀 Starting %s on port %d...\n", name, port)
 		if err := l.run.start(binPath, []string{"--port", fmt.Sprintf("%d", port)}, env); err != nil {
 			return gtErrors.Wrap(err, gtErrors.ErrProcessFailed,
 				fmt.Sprintf("failed to start %s", name))
@@ -129,7 +137,7 @@ func (l *Launcher) waitForApp(ctx context.Context) error {
 	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", basePort)
-	fmt.Printf("⏳ Waiting for app on %s...\n", addr)
+	termout.Printf("⏳ Waiting for app on %s...\n", addr)
 
 	attempts := int(l.readyTimeout / readyPoll)
 	if attempts < 1 {
@@ -137,19 +145,18 @@ func (l *Launcher) waitForApp(ctx context.Context) error {
 	}
 	for i := 0; i < attempts; i++ {
 		if l.dial(addr) == nil {
-			fmt.Printf("✅ App ready on %s\n", addr)
+			termout.Printf("✅ App ready on %s\n", addr)
 			return nil
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return gtErrors.Wrap(ctx.Err(), gtErrors.ErrServiceNotReady, "cancelled while waiting for the app")
 		case <-time.After(readyPoll):
 		}
 	}
 
-	l.logger.Warn("app did not become ready in time; continuing",
-		zap.String("addr", addr), zap.Duration("timeout", l.readyTimeout))
-	return nil
+	return gtErrors.New(gtErrors.ErrServiceNotReady,
+		fmt.Sprintf("app did not accept connections on %s within %s", addr, l.readyTimeout))
 }
 
 func tcpDial(addr string) error {
@@ -167,11 +174,11 @@ func (l *Launcher) Stop(ctx context.Context) error {
 		return err
 	}
 	for _, name := range binaries {
-		if err := l.run.stopByName(name); err != nil {
+		if err := l.run.stop(filepath.Join(l.gobin, name)); err != nil {
 			l.logger.Warn("failed to stop binary", zap.String("binary", name), zap.Error(err))
 			continue
 		}
-		fmt.Printf("🛑 %s stopped\n", name)
+		termout.Printf("🛑 %s stopped\n", name)
 	}
 	return nil
 }
@@ -222,20 +229,51 @@ func (o *osRunner) start(binaryPath string, args, env []string) error {
 	// Detach into its own process group so it survives the gtool process exit,
 	// matching the legacy launcher's backgrounded "&" binaries.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	return cmd.Start()
-}
-
-func (o *osRunner) stopByName(name string) error {
-	// Mirror the legacy "pkill -f $BINARY_NAME". Exit status 1 means no process
-	// matched, which is not an error for our purposes.
-	err := exec.Command("pkill", "-f", name).Run()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return nil
-		}
+	if err := cmd.Start(); err != nil {
 		return err
 	}
+	go func() { _ = cmd.Wait() }()
 	return nil
+}
+
+// commandPattern matches processes whose command line starts with exactly
+// binaryPath, unlike the legacy substring "pkill -f <name>" that also hit
+// editors, "tail -f <name>.log" or "go build -o <path>".
+func commandPattern(binaryPath string) string {
+	return "^" + regexp.QuoteMeta(binaryPath) + "( |$)"
+}
+
+// pgrepLike runs pkill/pgrep; exit status 1 means no process matched.
+func pgrepLike(name string, args ...string) (bool, error) {
+	err := exec.Command(name, args...).Run()
+	if err == nil {
+		return true, nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
+}
+
+// stop sends SIGTERM to the binary's processes and waits for them to exit,
+// escalating to SIGKILL, so a restart never races the old process for its port.
+func (o *osRunner) stop(binaryPath string) error {
+	pattern := commandPattern(binaryPath)
+	found, err := pgrepLike("pkill", "-TERM", "-f", pattern)
+	if err != nil || !found {
+		return err
+	}
+	for deadline := time.Now().Add(stopTimeout); time.Now().Before(deadline); time.Sleep(stopPoll) {
+		alive, err := pgrepLike("pgrep", "-f", pattern)
+		if err != nil {
+			return err
+		}
+		if !alive {
+			return nil
+		}
+	}
+	_, err = pgrepLike("pkill", "-KILL", "-f", pattern)
+	return err
 }
 
 func goBin() (string, error) {
@@ -244,9 +282,10 @@ func goBin() (string, error) {
 	}
 	gopath := strings.TrimSpace(goEnv("GOPATH"))
 	if gopath == "" {
-		return "", gtErrors.New(gtErrors.ErrInvalidArgument, "could not resolve GOPATH")
+		return "", gtErrors.New(gtErrors.ErrInvalidArgument,
+			"could not resolve GOPATH: is the go command installed and on PATH?")
 	}
-	return filepath.Join(gopath, "bin"), nil
+	return filepath.Join(filepath.SplitList(gopath)[0], "bin"), nil
 }
 
 func goEnv(key string) string {

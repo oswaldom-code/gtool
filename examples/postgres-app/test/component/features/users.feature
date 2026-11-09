@@ -2,7 +2,8 @@
 Feature: Users API backed by PostgreSQL
 
   Background:
-    * url 'http://localhost:8080'
+    # appUrl points at this run's app port (karate-config.js in the launcher).
+    * url appUrl
 
   Scenario: the service is healthy
     Given path '/health'

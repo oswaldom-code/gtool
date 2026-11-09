@@ -33,12 +33,27 @@ Variables: `DATA_DIR` (default `~/.gtool-jenkins`), `APP` (default
 ## Pipeline
 
 1. **Checkout** of the app repository.
-2. **Build image** — `docker build -t postgres-app:latest .`
+2. **Build image** — `docker build -t "$APP_IMAGE" .`, tagged per build
+   (`postgres-app:ci-<build number>`); gtool picks it up from
+   `GTOOL_DOCKER_IMAGE`.
 3. **Component tests** — `gtool test --config component-config.yml`; a failing
    scenario makes gtool exit non-zero and fails the build. gtool always tears
    down the mocks and the app.
-4. **Post** — publishes `test/component/reports/karate-summary.html`, also for
-   failed builds.
+4. **Post** — removes the build's image and publishes
+   `test/component/reports/karate-summary.html`, also for failed builds.
+
+## Concurrent builds
+
+Two builds of the job can run at the same time on one agent (`numExecutors: 2`):
+
+- **Ports** — `component-config.yml` uses `port: auto` for the mock and
+  `host-port: auto` for the app, so gtool picks free host ports per run. The
+  app gets the mock port through `${mocks.postgresql.port}`, and the features
+  reach the app through `appUrl`.
+- **Containers** — `GTOOL_RUN_ID=$BUILD_TAG` labels and names every container
+  of the run, so one build's teardown never touches another's.
+- **Image** — each build tags its own image instead of sharing
+  `postgres-app:latest`.
 
 ## Agent requirements
 
@@ -64,5 +79,3 @@ setup.
 - `ALLOW_LOCAL_CHECKOUT` lets the job clone a `file://` repository.
 - `DirectoryBrowserSupport.CSP` is cleared so the Karate HTML report renders
   with its scripts. Do not use either on a shared Jenkins.
-- Ports used by the app and mocks (8080, 5432) are host ports, so two builds
-  of the same app cannot run at the same time on one agent.

@@ -47,11 +47,15 @@ features in `test/component/features/`, and tears everything down.
 
 ## Networking notes
 
+- **Ports:** `component-config.yml` uses `port: auto` and `host-port: auto`, so
+  each `gtool test` run publishes the mock and the app on free host ports and
+  several runs can share one host. The app receives the mock port through
+  `${mocks.postgresql.port}`.
 - **App → mock:** gtool runs the app as a bridge-network container while the
-  mock publishes `5432` on the host. The app therefore reaches the mock through
-  the host gateway: gtool maps `host.docker.internal` to it on the app
+  mock publishes its port on the host. The app therefore reaches the mock
+  through the host gateway: gtool maps `host.docker.internal` to it on the app
   container, on Linux and Docker Desktop alike.
-- **Tests → app:** the Karate launcher runs on the host network, so it reaches
-  the app at `localhost:8080`.
+- **Tests → app:** the Karate launcher runs on the host network and reaches the
+  app through `appUrl` (`http://localhost:<app host port>`).
 - **Local image:** `postgres-app:latest` only exists locally after
   `docker build`; gtool uses the local image and only pulls when it is missing.

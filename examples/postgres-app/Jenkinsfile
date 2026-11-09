@@ -8,10 +8,16 @@ pipeline {
     timeout(time: 20, unit: 'MINUTES')
   }
 
+  environment {
+    APP_IMAGE          = "postgres-app:ci-${env.BUILD_NUMBER}"
+    GTOOL_DOCKER_IMAGE = "${APP_IMAGE}"
+    GTOOL_RUN_ID       = "${env.BUILD_TAG}"
+  }
+
   stages {
     stage('Build image') {
       steps {
-        sh 'docker build -t postgres-app:latest .'
+        sh 'docker build -t "$APP_IMAGE" .'
       }
     }
 
@@ -24,6 +30,7 @@ pipeline {
 
   post {
     always {
+      sh 'docker rmi "$APP_IMAGE" || true'
       publishHTML(target: [
         reportName: 'Karate report',
         reportDir: 'test/component/reports',

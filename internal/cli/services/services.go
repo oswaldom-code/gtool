@@ -206,7 +206,7 @@ func newServicesLogsCmd() *cobra.Command {
 		Short: "View service logs",
 		Long: `Display logs from a service.
 
-If no service is specified, shows logs from all services.
+Name a service, or pass --all for every service.
 
 Examples:
   gtool services logs postgresql     # View PostgreSQL logs

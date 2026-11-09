@@ -53,7 +53,7 @@ clean:
 ## install: Install the binary
 install: build
 	@echo "Installing $(BINARY_NAME)..."
-	@cp $(BUILD_DIR)/$(BINARY_NAME) $(GOPATH)/bin/
+	@cp $(BUILD_DIR)/$(BINARY_NAME) $(shell go env GOPATH)/bin/
 
 ## lint: Run linters
 lint:

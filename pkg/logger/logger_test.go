@@ -2,11 +2,13 @@ package logger
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestNew(t *testing.T) {
@@ -61,6 +63,51 @@ func TestNew(t *testing.T) {
 				assert.NotNil(t, logger.Logger)
 			}
 		})
+	}
+}
+
+func encodeLevel(t *testing.T, enc zapcore.LevelEncoder) string {
+	t.Helper()
+	arr := zapcore.NewMapObjectEncoder()
+	require.NoError(t, arr.AddArray("lvl", zapcore.ArrayMarshalerFunc(func(ae zapcore.ArrayEncoder) error {
+		enc(zapcore.InfoLevel, ae)
+		return nil
+	})))
+	return arr.Fields["lvl"].([]interface{})[0].(string)
+}
+
+func TestLevelEncoder(t *testing.T) {
+	tests := []struct {
+		name       string
+		isTerminal bool
+		noColor    string
+		wantANSI   bool
+	}{
+		{name: "terminal without NO_COLOR", isTerminal: true, wantANSI: true},
+		{name: "terminal with NO_COLOR", isTerminal: true, noColor: "1", wantANSI: false},
+		{name: "non-terminal", isTerminal: false, wantANSI: false},
+		{name: "non-terminal with NO_COLOR", isTerminal: false, noColor: "1", wantANSI: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := encodeLevel(t, levelEncoder(tt.isTerminal, tt.noColor))
+
+			assert.Contains(t, got, "INFO")
+			assert.Equal(t, tt.wantANSI, strings.Contains(got, "\x1b["))
+		})
+	}
+}
+
+func TestNewPlainLoggerHonorsTerminalDetection(t *testing.T) {
+	for _, isTerminal := range []bool{true, false} {
+		original := stderrIsTerminal
+		stderrIsTerminal = func() bool { return isTerminal }
+		t.Cleanup(func() { stderrIsTerminal = original })
+
+		logger, err := New("info", false)
+		require.NoError(t, err)
+		assert.NotNil(t, logger.Logger)
 	}
 }
 

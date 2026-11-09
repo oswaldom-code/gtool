@@ -30,7 +30,6 @@ type TestConfig struct {
 	Tags         string `yaml:"tags" json:"tags"`
 	FeaturesPath string `yaml:"features-path" json:"features-path"`
 	ReportsPath  string `yaml:"reports-path" json:"reports-path"`
-	Parallel     bool   `yaml:"parallel" json:"parallel"`
 }
 
 type ThirdPartyConfig struct {

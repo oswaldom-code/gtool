@@ -6,14 +6,16 @@ package nativeapp
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"go.uber.org/zap"
@@ -81,7 +83,7 @@ func New(logger *zap.Logger, buildConfigPath string) (*Launcher, error) {
 		gobin:           gobin,
 		workDir:         wd,
 		buildConfigPath: buildConfigPath,
-		run:             &osRunner{},
+		run:             newOSRunner(),
 		readyTimeout:    readyTimeout,
 		dial:            tcpDial,
 	}, nil
@@ -220,20 +222,35 @@ func (l *Launcher) binaries() ([]string, error) {
 	return names, nil
 }
 
-// osRunner runs real OS processes.
-type osRunner struct{}
+// osRunner runs real OS processes. Each started binary leads its own process
+// group and its PID is recorded, so stop can terminate the whole group even
+// when the binary is a wrapper script that exec'd something else.
+type osRunner struct {
+	stateDir string
+}
+
+func newOSRunner() *osRunner {
+	return &osRunner{stateDir: filepath.Join(os.TempDir(), "gtool-native")}
+}
+
+func (o *osRunner) pidFile(binaryPath string) string {
+	sum := sha1.Sum([]byte(binaryPath))
+	return filepath.Join(o.stateDir, hex.EncodeToString(sum[:8])+".pid")
+}
 
 func (o *osRunner) start(binaryPath string, args, env []string) error {
 	cmd := exec.Command(binaryPath, args...)
 	cmd.Env = env
-	// Detach into its own process group so it survives the gtool process exit,
-	// matching the legacy launcher's backgrounded "&" binaries.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = detachAttr()
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	go func() { _ = cmd.Wait() }()
-	return nil
+
+	if err := os.MkdirAll(o.stateDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(o.pidFile(binaryPath), []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
 }
 
 // commandPattern matches processes whose command line starts with exactly
@@ -255,10 +272,22 @@ func pgrepLike(name string, args ...string) (bool, error) {
 	return false, err
 }
 
-// stop sends SIGTERM to the binary's processes and waits for them to exit,
-// escalating to SIGKILL, so a restart never races the old process for its port.
+// stop terminates the binary: by process group when this runner started it
+// (pid file), otherwise by exact command line, as a fallback for instances
+// started outside gtool. It waits for the exit and escalates to SIGKILL, so a
+// restart never races the old process for its port.
 func (o *osRunner) stop(binaryPath string) error {
-	pattern := commandPattern(binaryPath)
+	pidFile := o.pidFile(binaryPath)
+	if data, err := os.ReadFile(pidFile); err == nil {
+		defer func() { _ = os.Remove(pidFile) }()
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+			return stopGroup(pid)
+		}
+	}
+	return o.stopByPattern(commandPattern(binaryPath))
+}
+
+func (o *osRunner) stopByPattern(pattern string) error {
 	found, err := pgrepLike("pkill", "-TERM", "-f", pattern)
 	if err != nil || !found {
 		return err

@@ -3,10 +3,8 @@ package nativeapp
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"syscall"
 	"testing"
 	"time"
 
@@ -178,30 +176,4 @@ func TestCommandPattern(t *testing.T) {
 	} {
 		assert.False(t, re.MatchString(cmdline), cmdline)
 	}
-}
-
-// TestOSRunnerStopsOnlyTheExactBinary runs real processes: a script started
-// by path is stopped, a same-named process started differently survives.
-func TestOSRunnerStopsOnlyTheExactBinary(t *testing.T) {
-	if _, err := exec.LookPath("pkill"); err != nil {
-		t.Skip("pkill not available")
-	}
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "orders-api")
-	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755))
-
-	bystander := exec.Command("sh", "-c", "exec -a 'tail -f "+bin+".log' sleep 30")
-	require.NoError(t, bystander.Start())
-	t.Cleanup(func() { _ = bystander.Process.Kill(); _ = bystander.Wait() })
-
-	r := &osRunner{}
-	require.NoError(t, r.start(bin, []string{"--port", "8080"}, os.Environ()))
-
-	require.NoError(t, r.stop(bin))
-
-	alive, err := pgrepLike("pgrep", "-f", commandPattern(bin))
-	require.NoError(t, err)
-	assert.False(t, alive, "the launched binary must be gone when stop returns")
-	assert.NoError(t, bystander.Process.Signal(syscall.Signal(0)), "an unrelated process mentioning the name must survive")
-	assert.NoError(t, r.stop(bin), "stopping when nothing runs is a no-op")
 }

@@ -18,7 +18,8 @@ test utilities a component test typically needs.
 
 | Variable | Class | Purpose |
 |---|---|---|
-| `ps` | `launcher.postgres.PostgresClient` | read / seed / assert against PostgreSQL (`localhost:5432`) |
+| `appUrl` | — | base URL of the app under test for this run (`GTOOL_APP_URL`, default `http://localhost:8080`); use `* url appUrl` |
+| `ps` | `launcher.postgres.PostgresClient` | read / seed / assert against PostgreSQL (this run's port, user, password and database from `GTOOL_POSTGRESQL_*`, defaults `postgres`) |
 | `du` | `utils.DateUtils` | timezone-aware date comparisons |
 | `pdfu` | `utils.PdfUtils` | page-by-page PDF diff (writes a highlighted diff image) |
 | `sleep(seconds)` | — | thread sleep |
@@ -33,21 +34,31 @@ Instantiate inside a feature, e.g.:
 * match redis.get('some-key') == 'expected'
 ```
 
-Each helper targets `localhost` (the container runs with `--network host`), so
-ports line up with the mocks `gtool services up` starts.
+Each helper targets `localhost` (the container runs with `--network host`).
+gtool exports this run's ports as `GTOOL_<SERVICE>_PORT` (and connection
+settings as `GTOOL_<SERVICE>_USER/PASSWORD/DATABASE`); `launcher.util.RunPorts`
+reads them and falls back to the plugin defaults, so helpers follow
+`port: auto`.
+
+Message matching (Pub/Sub consume/find, Kafka consume) is lenient and shared by
+every helper: a `null` expected value matches anything, objects must have the
+same fields, arrays match regardless of order (duplicates count), and
+`ignoreMessageFields` are removed before comparing. Messages that do not match
+are left for later steps (Pub/Sub nacks them; Kafka resumes after the last
+matched offset).
 
 | Class | Domain | Default endpoint |
 |---|---|---|
-| `launcher.postgres.PostgresClient` | PostgreSQL (rows/fields/exists/update/delete/scripts/param queries) | `localhost:5432` |
+| `launcher.postgres.PostgresClient` | PostgreSQL (rows/fields/exists/update/delete/scripts/param queries) | `GTOOL_POSTGRESQL_PORT` (default 5432) |
 | `launcher.mysql.MySqlClient` | MySQL/MariaDB (same API shape as PostgresClient) | from `url` |
-| `launcher.couchbase.CouchbaseClient` | Couchbase (get field/document, exists, N1QL) | from `connectionString` |
-| `launcher.redis.RedisClient` | Redis (set/get/exists/del/setEx) | `localhost:6379` |
-| `launcher.mongo.MongoClient` | MongoDB (insert/find/findOne/exists/delete, JSON filters) | from `connectionString` |
-| `launcher.kafka.KafkaClient` | Kafka producer (`publishMessage`) | `localhost:9092` |
-| `launcher.pubsub.PubSub` + `launcher.pubsub.operations.*` | Pub/Sub emulator (publish, consume, ordered, find, create topic/subscription) | `PUBSUB_EMULATOR_HOST` |
-| `launcher.gcs.operations.ReadObject` / `DeleteObject` | GCS emulator (fake-gcs-server) | `localhost:9086` |
-| `launcher.amazon.sqs.operations.PublishSQSMessage` | SQS (publish) | `localhost:4566` |
-| `launcher.s3.S3Client` | S3 / MinIO (put/get/exists/delete) | from `endpoint` |
+| `launcher.couchbase.CouchbaseClient` | Couchbase (get field/document, exists, N1QL); `close()` | from `connectionString` |
+| `launcher.redis.RedisClient` | Redis (set/get/exists/del/setEx) | `GTOOL_REDIS_PORT` (default 6379) |
+| `launcher.mongo.MongoClient` | MongoDB (insert/find/findOne/exists/delete, JSON filters); `close()` | `connectionString`, default `GTOOL_MONGODB_PORT` (27017) |
+| `launcher.kafka.KafkaClient` | Kafka (`publishMessage`, `consumeMessage`) | `GTOOL_KAFKA_PORT` (default 9092) |
+| `launcher.pubsub.PubSub` + `launcher.pubsub.operations.*` | Pub/Sub emulator (publish, consume, ordered, find, create topic/subscription) | `PUBSUB_EMULATOR_HOST`, else `GTOOL_PUBSUB_PORT` (8085) |
+| `launcher.gcs.operations.ReadObject` / `DeleteObject` | GCS emulator (fake-gcs-server) | `GTOOL_GCS_PORT` (default 4443) |
+| `launcher.amazon.sqs.operations.PublishSQSMessage` | SQS (publish) | `GTOOL_FLOCI_PORT` (default 4566) |
+| `launcher.s3.S3Client` | S3 / MinIO (put/get/exists/delete); `close()` | from `endpoint` |
 | `launcher.util.Jwt` | generate / verify / inspect HS256 tokens | — |
 | `launcher.util.Faker` | random test data (name/email/uuid/number/expression) | — |
 | `launcher.util.JsonSchema` | JSON Schema (Draft 2020-12) validation | — |
@@ -57,7 +68,7 @@ ports line up with the mocks `gtool services up` starts.
 
 ## Runtime contract (consumed by gtool)
 
-`gtool`'s Karate runner (`internal/core/test/stablekarate/runner.go`) expects:
+`gtool`'s Karate runners (`internal/core/test/karate.go`, `internal/core/test/stablekarate/runner.go`) expect:
 
 | Aspect | Value |
 |---|---|
@@ -65,7 +76,7 @@ ports line up with the mocks `gtool services up` starts.
 | Features (bind, ro) | `/app/features` |
 | Reports (bind) | `/app/target/karate-reports` (HTML: `karate-summary.html`) |
 | Entry | `CMD ["bash","-c","./scripts/run.bash"]` |
-| Env | `TAGS`, `URLS_TO_BLOCK`, `PUBSUB_EMULATOR_HOST` |
+| Env | `TAGS`, `PUBSUB_EMULATOR_HOST`, `GTOOL_APP_URL`, `GTOOL_<SVC>_PORT`, `GTOOL_<SVC>_{USER,PASSWORD,DATABASE}`, `MVN_ONLINE` (allow Maven downloads; offline by default), `DEBUG`. `URLS_TO_BLOCK` is accepted for the legacy contract but ignored |
 | Network | host |
 | User | invoking host user (`uid:gid`), so reports are owned by it |
 | Pass/fail | container exit code |

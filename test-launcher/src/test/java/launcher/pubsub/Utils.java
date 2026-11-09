@@ -104,24 +104,32 @@ public final class Utils {
         return containsAttributes(pubSubData, message.getMessage());
     }
 
+    /** True when the message carries every expected attribute with the same value. */
     public static boolean containsAttributes(final PubSubData pubSubData, final PubsubMessage message) {
-        final Map<String, String> pubSubDataAttributes = pubSubData.attributes;
-        final Map<String, String> pubSubMsgAttributes = message.getAttributesMap();
-        boolean ret = true;
-        if (pubSubDataAttributes != null && !pubSubDataAttributes.isEmpty()) {
-            for (final Iterator<Map.Entry<String, String>> it = pubSubDataAttributes.entrySet().iterator();
-                    it.hasNext() && !ret;) {
-                final Map.Entry<String, String> attr = it.next();
-                final String messageAttributeValue = pubSubMsgAttributes.get(attr.getKey());
-                ret = messageAttributeValue == null || !messageAttributeValue.equals(attr.getValue());
+        final Map<String, String> expected = pubSubData.attributes;
+        if (expected == null || expected.isEmpty()) {
+            return true;
+        }
+        final Map<String, String> actual = message.getAttributesMap();
+        for (final Map.Entry<String, String> attr : expected.entrySet()) {
+            if (!attr.getValue().equals(actual.get(attr.getKey()))) {
+                return false;
             }
         }
-        return ret;
+        return true;
     }
 
+    /**
+     * Lenient comparison: a null expected value matches anything, objects must
+     * have the same fields, and arrays match regardless of order (duplicates
+     * count).
+     */
     public static boolean compareJsonNodes(final JsonNode expectedNode, final JsonNode node) {
         if (expectedNode.isNull() || expectedNode.isMissingNode() || expectedNode.equals(node)) {
             return true;
+        }
+        if (node == null || node.isMissingNode()) {
+            return false;
         }
         if (expectedNode.isArray() && node.isArray()) {
             return compareArrays((ArrayNode) expectedNode, (ArrayNode) node);
@@ -143,15 +151,25 @@ public final class Utils {
     }
 
     private static boolean compareArrays(final ArrayNode expectedArrayNode, final ArrayNode arrayNode) {
-        return convertArrayNodeToSet(expectedArrayNode).equals(convertArrayNodeToSet(arrayNode));
+        if (expectedArrayNode.size() != arrayNode.size()) {
+            return false;
+        }
+        final boolean[] used = new boolean[arrayNode.size()];
+        for (final JsonNode expected : expectedArrayNode) {
+            if (!claimMatch(expected, arrayNode, used)) {
+                return false;
+            }
+        }
+        return true;
     }
 
-    private static Set<JsonNode> convertArrayNodeToSet(final ArrayNode arrayNode) {
-        final Set<JsonNode> set = new HashSet<>();
-        final Iterator<JsonNode> elements = arrayNode.elements();
-        while (elements.hasNext()) {
-            set.add(elements.next());
+    private static boolean claimMatch(final JsonNode expected, final ArrayNode actual, final boolean[] used) {
+        for (int i = 0; i < actual.size(); i++) {
+            if (!used[i] && compareJsonNodes(expected, actual.get(i))) {
+                used[i] = true;
+                return true;
+            }
         }
-        return set;
+        return false;
     }
 }

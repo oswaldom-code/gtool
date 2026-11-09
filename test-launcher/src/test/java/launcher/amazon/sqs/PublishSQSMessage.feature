@@ -1,6 +1,6 @@
 @ignore
 Feature: Publish a message to an SQS queue
-  # Args: queueName, message. Endpoint: localhost:4566.
+  # Args: queueName, message. Endpoint: localhost:<GTOOL_FLOCI_PORT, default 4566>.
 
   Scenario: Publish a message to an SQS queue
     * def PublishSQSMessage = Java.type('launcher.amazon.sqs.operations.PublishSQSMessage')

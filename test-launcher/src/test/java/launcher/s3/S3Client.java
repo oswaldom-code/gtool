@@ -20,7 +20,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
  * S3-compatible object storage helper (AWS S3 or MinIO via endpoint override),
  * for seeding and asserting objects. Exposed to Karate via Java.type.
  */
-public class S3Client {
+public class S3Client implements AutoCloseable {
 
     private final software.amazon.awssdk.services.s3.S3Client s3;
 
@@ -83,5 +83,10 @@ public class S3Client {
     /** Delete an object. */
     public void deleteObject(final String bucket, final String key) {
         s3.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
+    }
+
+    @Override
+    public void close() {
+        s3.close();
     }
 }

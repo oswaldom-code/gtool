@@ -15,8 +15,9 @@ import com.jayway.jsonpath.JsonPath;
  * Couchbase helper for reads and N1QL queries against a running cluster.
  * Exposed to Karate via Java.type.
  */
-public class CouchbaseClient {
+public class CouchbaseClient implements AutoCloseable {
 
+    private final Cluster cluster;
     private final Bucket bucket;
 
     /**
@@ -28,7 +29,7 @@ public class CouchbaseClient {
         final String user = (String) config.get("user");
         final String password = (String) config.get("password");
 
-        final Cluster cluster = Cluster.connect(connectionString, user, password);
+        this.cluster = Cluster.connect(connectionString, user, password);
         this.bucket = cluster.bucket(bucketName);
     }
 
@@ -55,12 +56,14 @@ public class CouchbaseClient {
 
     /** Run a scoped N1QL query, returning the rows as a JSON string (or the error message). */
     public String executeQuery(final String query, final String bucketName, final String scopeName) {
-        final Scope scope = bucket.scope(scopeName);
-        try {
-            final QueryResult result = scope.query(query);
-            return result.rowsAsObject().toString();
-        } catch (Exception e) {
-            return e.getMessage();
-        }
+        final Bucket target = bucketName == null || bucketName.isEmpty() ? bucket : cluster.bucket(bucketName);
+        final Scope scope = target.scope(scopeName);
+        final QueryResult result = scope.query(query);
+        return result.rowsAsObject().toString();
+    }
+
+    @Override
+    public void close() {
+        cluster.disconnect();
     }
 }

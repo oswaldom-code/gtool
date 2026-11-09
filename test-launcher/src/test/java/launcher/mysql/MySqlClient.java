@@ -17,6 +17,8 @@ import org.slf4j.LoggerFactory;
 
 import launcher.postgres.v2.Utils;
 
+import launcher.util.SqlScript;
+
 /**
  * MySQL/MariaDB helper for seeding and asserting state against a running database.
  * Mirrors {@code PostgresClient}'s API (map filters → WHERE clauses) over a JDBC
@@ -128,11 +130,8 @@ public class MySqlClient {
     /** Execute a SQL script (statements separated by {@code ;}). */
     public Boolean executeSqlScript(final String sql) {
         try (Connection con = open(); Statement st = con.createStatement()) {
-            for (final String statement : sql.split(";")) {
-                final String query = statement + ";";
-                if (!query.trim().equals(";")) {
-                    st.executeUpdate(query);
-                }
+            for (final String statement : SqlScript.split(sql, false)) {
+                st.execute(statement);
             }
             return true;
         } catch (SQLException e) {

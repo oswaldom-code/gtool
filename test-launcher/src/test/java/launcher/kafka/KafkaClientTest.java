@@ -1,5 +1,6 @@
 package launcher.kafka;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,5 +33,13 @@ class KafkaClientTest {
     @Test
     void doesNotMatchInvalidJson() {
         assertFalse(KafkaClient.matches("{\"id\":\"1\"}", "not json", Set.of()));
+    }
+
+    @Test
+    void consumedOffsetOnlyMovesForward() {
+        final org.apache.kafka.common.TopicPartition p = new org.apache.kafka.common.TopicPartition("orders-test", 0);
+        KafkaClient.markConsumed(p, 4);
+        KafkaClient.markConsumed(p, 2);
+        assertEquals(5L, KafkaClient.consumedOffset(p), "resume after the furthest matched message");
     }
 }

@@ -1,6 +1,5 @@
 package launcher.postgres.v2;
 
-import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
@@ -13,7 +12,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import launcher.postgres.DatabaseConnectionSingleton;
+import launcher.postgres.PostgresConnections;
 
 /**
  * Base class providing parametrized query/update execution against PostgreSQL.
@@ -30,12 +29,12 @@ public abstract class DBConnector {
 
     /**
      * Execute a parametrized query (? placeholders) and return the rows as maps.
+     * A database error fails the step instead of looking like an empty result.
      */
     public List<Map<String, Object>> executeParamQuery(final String query, final List<Object> values) {
-        final Connection con = DatabaseConnectionSingleton.getInstance(config).connection;
         final List<Map<String, Object>> resultRows = new ArrayList<>();
 
-        try (PreparedStatement pst = con.prepareStatement(query)) {
+        try (PreparedStatement pst = PostgresConnections.get(config).prepareStatement(query)) {
             for (int x = 0; x < values.size(); x++) {
                 pst.setObject(x + 1, values.get(x));
             }
@@ -49,8 +48,9 @@ public abstract class DBConnector {
                     resultRows.add(row);
                 }
             }
-        } catch (Exception e) {
+        } catch (SQLException e) {
             logger.error("{executeParamQuery} Error executing query {}", query, e);
+            throw new IllegalStateException("query failed: " + query, e);
         }
         return resultRows;
     }
@@ -66,9 +66,8 @@ public abstract class DBConnector {
      * Execute a parametrized UPDATE/DELETE and return the number of affected rows.
      */
     protected int executeParamUpdate(final String query, final List<Object> values) {
-        int numRowsAffected = 0;
-        final Connection con = DatabaseConnectionSingleton.getInstance(config).connection;
-        try (PreparedStatement stmt = con.prepareStatement(query)) {
+        int numRowsAffected;
+        try (PreparedStatement stmt = PostgresConnections.get(config).prepareStatement(query)) {
             for (int x = 0; x < values.size(); x++) {
                 stmt.setObject(x + 1, values.get(x));
             }
@@ -78,6 +77,7 @@ public abstract class DBConnector {
             }
         } catch (SQLException e) {
             logger.error("{executeParamUpdate} Error executing query {}. Values: {}.", query, values, e);
+            throw new IllegalStateException("update failed: " + query, e);
         }
         return numRowsAffected;
     }

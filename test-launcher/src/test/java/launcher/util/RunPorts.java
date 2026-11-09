@@ -31,6 +31,13 @@ public final class RunPorts {
         return resolve(System.getenv(), envName(service), fallback);
     }
 
+    /** A mock connection setting (user, password, database) for this run, e.g. GTOOL_POSTGRESQL_USER. */
+    public static String setting(final String service, final String key, final String fallback) {
+        final String name = "GTOOL_" + service.toUpperCase(Locale.ROOT).replace('-', '_') + "_"
+                + key.toUpperCase(Locale.ROOT).replace('-', '_');
+        return resolve(System.getenv(), name, fallback);
+    }
+
     /** Base URL of the app under test for this run. */
     public static String appUrl() {
         return resolve(System.getenv(), "GTOOL_APP_URL", DEFAULT_APP_URL);

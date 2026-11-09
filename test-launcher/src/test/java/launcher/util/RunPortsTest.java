@@ -31,4 +31,9 @@ class RunPortsTest {
         assertEquals("65000", RunPorts.port("not-a-service", "65000"));
         assertEquals(System.getenv().getOrDefault("GTOOL_APP_URL", "http://localhost:8080"), RunPorts.appUrl());
     }
+
+    @Test
+    void settingFallsBackOutsideGtool() {
+        assertEquals("postgres", RunPorts.setting("not-a-service", "user", "postgres"));
+    }
 }

@@ -7,13 +7,10 @@ import java.nio.ByteBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.cloud.NoCredentials;
 import com.google.cloud.ReadChannel;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.Storage;
-import com.google.cloud.storage.StorageOptions;
 
-import launcher.util.RunPorts;
 
 /**
  * Reads an object from the local GCS emulator (fake-gcs-server). Returns the
@@ -21,17 +18,19 @@ import launcher.util.RunPorts;
  */
 public class ReadObject implements GcsOperation {
 
-    private static final String GCS_SERVER = "http://localhost:" + RunPorts.port("gcs", "9086");
     private static final Logger logger = LoggerFactory.getLogger(ReadObject.class);
 
     @Override
     public byte[] execute(final String bucket, final String filePath) {
-        final Storage storage = StorageOptions.newBuilder()
-                .setHost(GCS_SERVER)
-                .setProjectId("test-project")
-                .setCredentials(NoCredentials.getInstance())
-                .build()
-                .getService();
+        final Storage storage = GcsStorage.open();
+        try {
+            return execute(storage, bucket, filePath);
+        } finally {
+            GcsStorage.close(storage);
+        }
+    }
+
+    private byte[] execute(final Storage storage, final String bucket, final String filePath) {
 
         final Blob blob = storage.get(bucket, filePath);
         if (blob == null) {

@@ -2,6 +2,10 @@ package launcher.pubsub;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.api.client.util.Strings;
 import com.google.api.gax.core.CredentialsProvider;
@@ -19,12 +23,16 @@ import com.google.pubsub.v1.TopicName;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import launcher.pubsub.operations.PubSubOperation;
+import launcher.util.RunPorts;
 
 /**
  * Runs Pub/Sub operations against the local emulator (host:port from
  * {@code PUBSUB_EMULATOR_HOST}). Exposed to Karate as {@code Java.type('launcher.pubsub.PubSub')}.
  */
 public class PubSub {
+
+    private static final Logger logger = LoggerFactory.getLogger(PubSub.class);
+    private static final long PUBLISHER_SHUTDOWN_SECONDS = 5;
 
     public static class PubSubData {
         public String projectId;
@@ -47,33 +55,57 @@ public class PubSub {
         public TransportChannelProvider channelProvider;
     }
 
-    /**
-     * Runs an operation, propagating any exception (use in debug/strict scenarios).
-     */
-    public String runOperationOnEmulatorDebug(final PubSubOperation operation, final PubSubData data) throws Exception {
-        final String hostport = System.getenv("PUBSUB_EMULATOR_HOST");
-        final ManagedChannel channel = ManagedChannelBuilder.forTarget(hostport).usePlaintext().build();
+    /** Emulator address: PUBSUB_EMULATOR_HOST, or this run's pubsub port on localhost. */
+    public static String emulatorHost() {
+        final String host = System.getenv("PUBSUB_EMULATOR_HOST");
+        return host == null || host.isBlank() ? "localhost:" + RunPorts.port("pubsub", "8085") : host;
+    }
+
+    private String run(final PubSubOperation operation, final PubSubData data) throws Exception {
+        final ManagedChannel channel = ManagedChannelBuilder.forTarget(emulatorHost()).usePlaintext().build();
         try {
             wire(data, channel);
             return operation.execute(data);
         } finally {
+            release(data);
             channel.shutdown();
         }
     }
 
     /**
-     * Runs an operation, returning "KO" on any failure.
+     * Runs an operation, propagating any exception (use in debug/strict scenarios).
      */
-    public String runOperationOnEmulator(final PubSubOperation operation, final PubSubData data) throws Exception {
-        final String hostport = System.getenv("PUBSUB_EMULATOR_HOST");
-        final ManagedChannel channel = ManagedChannelBuilder.forTarget(hostport).usePlaintext().build();
+    public String runOperationOnEmulatorDebug(final PubSubOperation operation, final PubSubData data) throws Exception {
+        return run(operation, data);
+    }
+
+    /**
+     * Runs an operation, returning "KO" on any failure (the cause is logged).
+     */
+    public String runOperationOnEmulator(final PubSubOperation operation, final PubSubData data) {
         try {
-            wire(data, channel);
-            return operation.execute(data);
+            return run(operation, data);
         } catch (Exception e) {
+            logger.error("Pub/Sub operation {} failed", operation.getClass().getSimpleName(), e);
             return "KO";
-        } finally {
-            channel.shutdown();
+        }
+    }
+
+    /** Releases the clients created by wire; each call creates its own. */
+    private static void release(final PubSubData data) {
+        if (data.publisher != null) {
+            try {
+                data.publisher.shutdown();
+                data.publisher.awaitTermination(PUBLISHER_SHUTDOWN_SECONDS, TimeUnit.SECONDS);
+            } catch (IllegalStateException | InterruptedException e) {
+                logger.debug("publisher already shut down", e);
+            }
+        }
+        if (data.topicClient != null) {
+            data.topicClient.close();
+        }
+        if (data.subscriptionClient != null) {
+            data.subscriptionClient.close();
         }
     }
 

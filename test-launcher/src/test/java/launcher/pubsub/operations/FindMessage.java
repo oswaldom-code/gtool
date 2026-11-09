@@ -52,9 +52,9 @@ public class FindMessage implements PubSubOperation {
             JsonNode messageTree = Utils.mapperMessageToJsonNode(stringMessage, pubSubData);
             log = log + "New message was found! \n";
             log = log + messageTree.toString() + "\n";
-            log = log + "************************" + expectedMessageTree.equals(messageTree) + "****************************************" + "\n";
+            log = log + "************************" + Utils.compareJsonNodes(expectedMessageTree, messageTree) + "****************************************" + "\n";
             // Handle received message
-            if (notFoundMessage && expectedMessageTree.equals(messageTree)
+            if (notFoundMessage && Utils.compareJsonNodes(expectedMessageTree, messageTree)
                     && Utils.isValidOrdering(pubSubData, message)
                     && Utils.containsAttributes(pubSubData, message)) {
                 notFoundMessage = false;

@@ -1,0 +1,100 @@
+site_name: gtool
+site_description: Component testing orchestrator for microservices. Mocks, app, tests and cleanup in one command.
+site_url: https://oswaldom-code.github.io/gtool/
+repo_url: https://github.com/oswaldom-code/gtool
+repo_name: oswaldom-code/gtool
+edit_uri: ""
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  icon:
+    repo: fontawesome/brands/github
+  font: false
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - content.code.copy
+    - content.tabs.link
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+  - Guides:
+      - Component pipeline: guides/pipeline.md
+      - Mock services: guides/mocks.md
+      - Application under test: guides/app.md
+      - Stress testing: guides/stress.md
+      - Unit tests: guides/unit.md
+  - Reference:
+      - Configuration: reference/configuration.md
+      - CLI: reference/cli.md
+      - Architecture: reference/architecture.md
+      - Examples: reference/examples.md
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: es
+          name: Español
+          build: true
+          site_description: Orquestador de tests de componente para microservicios. Mocks, app, tests y limpieza en un solo comando.
+          nav_translations:
+            Home: Inicio
+            Getting started: Primeros pasos
+            Installation: Instalación
+            Quickstart: Inicio rápido
+            Guides: Guías
+            Component pipeline: Pipeline de componente
+            Mock services: Servicios mock
+            Application under test: Aplicación bajo prueba
+            Stress testing: Pruebas de estrés
+            Unit tests: Tests unitarios
+            Reference: Referencia
+            Configuration: Configuración
+            CLI: CLI
+            Architecture: Arquitectura
+            Examples: Ejemplos
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_css:
+  - stylesheets/extra.css

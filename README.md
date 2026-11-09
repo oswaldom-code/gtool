@@ -1,11 +1,17 @@
+<p align="center">
+  <img src="web/docs/assets/banner.svg" alt="gtool - component testing orchestrator for microservices" width="830">
+</p>
+
 # GTOOL - Component Testing Orchestrator
 
 > 🌐 **Language:** English · [Español](docs/readme/README.es.md)
+>
+> 📚 **Documentation:** [oswaldom-code.github.io/gtool](https://oswaldom-code.github.io/gtool/)
 
 <div align="center">
 
-[![Go Version](https://img.shields.io/badge/go-1.24+-00ADD8?logo=go)](https://go.dev/)
-![Tests](https://img.shields.io/badge/tests-185%20passing-success)
+[![Go Version](https://img.shields.io/badge/go-1.26+-00ADD8?logo=go)](https://go.dev/)
+![Tests](https://img.shields.io/badge/tests-passing-success)
 ![Pipeline](https://img.shields.io/badge/pipeline-functional-success)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
@@ -41,20 +47,35 @@ graph LR
 4. **Report** — generates the Karate HTML report and can open it in the browser.
 5. **Cleanup** — always tears down app and mocks, even on failure or Ctrl-C.
 
-Beyond the pipeline, GTOOL also runs **unit tests** (`gtool unit` — mock generation + Ginkgo) and can drive each phase on its own (`gtool services`, `gtool app`, `gtool test karate`). New mock services plug in through the `ServicePlugin` interface.
+Beyond the pipeline, GTOOL also:
+
+- **Stress-tests the app** (`gtool stress`) — reuses mocks → app, ramps the load over targets resolved from an OpenAPI contract, reports the degradation and breaking points and gates CI on a minimum sustained load.
+- **Runs unit tests** (`gtool unit`) — mock generation + Ginkgo.
+- **Drives each phase on its own** — `gtool services`, `gtool app`, `gtool test karate`.
+
+New mock services plug in through the `ServicePlugin` interface.
 
 ---
 
 ## 🚀 Installation
 
 ```bash
-git clone <repo-url> && cd gtool
+# Latest release
+go install github.com/oswaldom-code/gtool/cmd/gtool@latest
 
-make build              # builds ./bin/gtool
-./bin/gtool version     # verify
+# Karate launcher image (not published; build it once per machine)
+docker build -t gtool/test-launcher-back:latest \
+  https://github.com/oswaldom-code/gtool.git#v1.0.0:test-launcher
 
-make install            # copies the binary to $GOPATH/bin
+# From source
+git clone https://github.com/oswaldom-code/gtool.git && cd gtool
+make build              # builds ./bin/gtool with version, commit and build date
+./bin/gtool version --full
+make install            # copies the binary to $(go env GOPATH)/bin
+make test-launcher-image  # builds the Karate launcher image
 ```
+
+`go install` does not inject build metadata, so `gtool version --full` reports commit `dev`; build with `make build` when you need it (it is also recorded in the stress reports).
 
 > ⚠️ **`make install` copies to `$GOPATH/bin` (`~/go/bin`).** If your terminal can't find `gtool` after installing, that directory is not on your `PATH`. Add it:
 > ```bash
@@ -62,7 +83,9 @@ make install            # copies the binary to $GOPATH/bin
 > source ~/.zshrc && rehash
 > ```
 
-**Requirements:** Go 1.24+, Docker, Make.
+**Requirements:** Go 1.26+, Docker, Make.
+
+**AI coding agents:** the repository ships an [Agent Skill](skills/gtool/SKILL.md) that teaches agents (Claude Code, Codex, Cursor, Gemini CLI and others) to install gtool and wire it into a service: `npx skills add oswaldom-code/gtool --skill gtool`.
 
 ---
 
@@ -87,7 +110,7 @@ GTOOL looks for `./component-config.yml` by default. Use `--config <file>` for a
 
 ## 📖 Commands
 
-Every command accepts `--config <file>`, `--log-level debug|info|warn|error` (also `GTOOL_LOG_LEVEL` or `observability.log-level`) and `--verbose` (debug). Output uses symbols only on an interactive terminal; with a pipe, `NO_COLOR` or `CI` it is plain text.
+Every command accepts `--config <file>`, `--log-level debug|info|warn|error` (also `GTOOL_LOG_LEVEL` or `observability.log-level`) and `--verbose` (debug). Output uses symbols only on an interactive terminal; with a pipe, `NO_COLOR` or `CI` it is plain text. `gtool completion <shell>` generates shell autocompletion.
 
 ### `gtool config` — configuration
 ```bash
@@ -100,6 +123,7 @@ gtool config show --format json
 ```bash
 gtool services up                     # starts every mock in the config
 gtool s up postgresql kafka           # starts specific services
+gtool s up --stable                   # fixed-contract mocks seeded from test/component/mocks-data
 gtool s status                        # services status
 gtool s logs postgresql --tail 200 -f # logs of a service; -f follows one service until Ctrl-C (--all for every service)
 gtool s down                          # stops all (only containers without a run ID; --all-runs for every run)
@@ -107,7 +131,8 @@ gtool s down                          # stops all (only containers without a run
 
 ### `gtool app` — application under test
 ```bash
-gtool app start --docker-image myapp:latest --port 8080
+gtool app start --docker-image myapp:latest --port 8080 --env LOG_LEVEL=debug
+gtool app start --native              # build-config.yml binaries as native processes
 gtool app status
 gtool app logs --tail 100
 gtool app restart                     # --native restarts the native binaries
@@ -125,9 +150,12 @@ gtool unit --build-config build-config.yml
 ### `gtool test` — component pipeline
 ```bash
 gtool test                            # gtool-native pipeline (public images); --tags overrides test-config.tags
-gtool test karate                     # Karate only (mocks and app already up)
-gtool test karate --tags "@smoke" --no-open
+gtool test --stable --tags "@smoke"   # fixed-contract mocks + native app + Karate
+gtool test karate                     # Karate only (mocks and app already up, explicit ports)
+gtool test karate --tags "@smoke" --reports ./out
+gtool test karate --stable --no-open  # legacy component e against services up --stable + app start --native
 ```
+`gtool test karate` reads `test-config` and the ports of the config file like `gtool test`; `--tags`, `--features` and `--reports` override it, and `--image` overrides the launcher image. `--urls-to-block` and `--no-open` only apply with `--stable`.
 
 ### `gtool stress` — stress testing
 ```bash
@@ -137,10 +165,10 @@ gtool stress --target-url https://staging.example.com   # remote target, skips m
 ```
 Ramps the load in steps over targets resolved from an OpenAPI contract (Swagger 2.0 / OpenAPI 3.x) and/or an explicit `targets` list, and reports the **degradation point** (p95 over a factor of the baseline or an absolute SLO, or throughput below 90% of the requested rate) and the **breaking point** (5xx + network error rate over the threshold). Writes `stress-report.json` (stable schema for CI) and a self-contained `stress-report.html`, and exits non-zero when the sustained load is below `min-acceptable-rps`. See the [`stress-config` example](configs/stress-example.yml).
 
-### `gtool generate` / `gtool version`
+### `gtool generate` (alias `g`) / `gtool version`
 ```bash
 gtool generate config                 # generates a sample component-config.yml
-gtool version
+gtool version --full                  # version, git commit and build date
 ```
 
 ---
@@ -228,6 +256,26 @@ mocks:
 
 ---
 
+## 🧪 Examples
+
+[`examples/`](examples/) holds self-contained sample apps (each with its own `go.mod`, `Dockerfile`, `component-config.yml` and Karate features) that exercise the pipeline end-to-end against one mock each:
+
+| Example | Mock |
+|---|---|
+| [`postgres-app`](examples/postgres-app/) | PostgreSQL — also the `gtool stress` sample ([`configs/stress-example.yml`](configs/stress-example.yml)) |
+| [`mysql-app`](examples/mysql-app/) | MySQL |
+| [`mongodb-app`](examples/mongodb-app/) | MongoDB |
+| [`redis-app`](examples/redis-app/) | Redis |
+| [`kafka-app`](examples/kafka-app/) | Kafka |
+| [`pubsub-app`](examples/pubsub-app/) | Pub/Sub |
+| [`gcs-app`](examples/gcs-app/) | GCS |
+| [`s3-app`](examples/s3-app/) | Floci (S3) |
+| [`mountebank-app`](examples/mountebank-app/) | Mountebank (stubbed external API) |
+
+[`examples/ci/jenkins`](examples/ci/jenkins/) runs a local Jenkins that executes the example pipelines with gtool.
+
+---
+
 ## 🏗️ Architecture
 
 ```mermaid
@@ -235,8 +283,9 @@ graph TB
     User[👤 User] --> CLI[CLI - Cobra]
     CLI --> Orch[Orchestrator]
     Orch --> Mock[Mock Manager]
-    Orch --> App[App Launcher]
+    Orch --> App[App Manager]
     Orch --> Test[Test Runner]
+    Orch -.-> Stress[Stress Runner]
     Mock --> Plugins[Service Plugins]
     Plugins --> Docker[Docker Client]
     App --> Docker
@@ -247,9 +296,12 @@ graph TB
     style Mock fill:#4fc3f7
     style App fill:#4fc3f7
     style Test fill:#4fc3f7
+    style Stress fill:#4fc3f7
 ```
 
-- **Plugins** (`internal/plugin/`): `ServicePlugin` (mocks), `AppLauncher`, `TestExecutor`, registered in a thread-safe `PluginRegistry`.
+- **Plugins** (`internal/plugin/`): `ServicePlugin` (mocks), registered in a thread-safe `plugin.Registry`; defaults and accepted keys in `internal/plugin/services/defaults.go`.
+- **App** (`internal/core/app`): the app as a container (`DockerManager`) or as native processes (`nativeapp`).
+- **Orchestrator** (`internal/core/orchestrator`): runs mocks → app → test phase and always tears down. The test phase is a `TestRunner`: the Karate runner for `gtool test`, the stress runner (`internal/core/stress`, vegeta + libopenapi) for `gtool stress`.
 - **Typed errors** (`pkg/errors`) and **structured logging** with Zap (`pkg/logger`).
 
 ---
@@ -257,16 +309,20 @@ graph TB
 ## 🛠️ Development
 
 ```bash
-make build          # builds ./bin/gtool
-make test           # tests with -race
-make test-coverage  # HTML coverage report
-make lint           # golangci-lint
-make fmt            # gofmt + goimports
-make clean          # cleans artifacts
-make help           # lists every target
+make build                # builds ./bin/gtool
+make test                 # tests with -race
+make test-coverage        # HTML coverage report
+make lint                 # golangci-lint
+make staticcheck          # staticcheck
+make trivy                # dependency vulnerability scan
+make fmt                  # go fmt + goimports
+make test-launcher-image  # builds the Karate launcher image
+make release              # cross-platform binaries in bin/releases
+make clean                # cleans artifacts
+make help                 # lists every target
 ```
 
-**Standards:** minimum 80% coverage for new code (95%+ for config/orchestration), table-driven tests, errors from `pkg/errors`, conventional commits. See [CLAUDE.md](CLAUDE.md).
+**Standards:** minimum 80% coverage for new code (95%+ for config/orchestration), Ginkgo/Gomega or table-driven tests, errors from `pkg/errors`, structured logging with Zap, conventional commits.
 
 Integration tests (require Docker) per plugin:
 ```bash
@@ -285,15 +341,16 @@ go test -tags=integration ./internal/plugin/services/...
 
 ## 📦 Status
 
-Functional end-to-end pipeline: 10 mock plugins, app launcher (Docker and native), Karate runner and orchestration with guaranteed teardown.
+Functional end-to-end pipeline: 10 mock plugins, app launcher (Docker and native), Karate runner, stress testing and orchestration with guaranteed teardown.
 
 | Phase | Status |
 |------|--------|
 | 1. Foundation (CLI, config, plugins, errors, logging) | ✅ |
-| 2. Mocks (6 plugins) | ✅ |
-| 3. App Launcher (Docker + native) | ✅ |
+| 2. Mocks (10 plugins) | ✅ |
+| 3. App (Docker + native) | ✅ |
 | 4. Test Executor (Karate) | ✅ |
 | 5. Orchestration (pipeline + teardown) | ✅ |
+| Stress testing (`gtool stress`) | ✅ |
 | 6–7. Advanced features, docs/release | 🔄 |
 
 ---

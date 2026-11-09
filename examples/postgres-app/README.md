@@ -45,6 +45,22 @@ gtool test --config component-config.yml
 `test/component/mocks-data/postgresql/`), starts this app, runs the Karate
 features in `test/component/features/`, and tears everything down.
 
+## Stress test it with gtool
+
+`api/openapi.yml` describes the endpoints, and `configs/stress-example.yml` at the
+repository root ramps the load over the GET operations (`/users` from the
+contract, `/health` as an explicit target):
+
+```bash
+# From the repository root, after building the image
+gtool stress plan --config configs/stress-example.yml   # resolved targets, no load
+gtool stress --config configs/stress-example.yml        # mocks → app → ramp → reports → cleanup
+```
+
+The JSON and HTML reports are written to `test/stress/reports/` in this
+directory (git-ignored). The run fails when the sustained load is below
+`min-acceptable-rps`.
+
 ## Networking notes
 
 - **Ports:** `component-config.yml` uses `port: auto` and `host-port: auto`, so

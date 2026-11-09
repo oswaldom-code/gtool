@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="gtool - component testing orchestrator for microservices">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1712"/>
+      <stop offset="1" stop-color="#12261e"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10b981"/>
+      <stop offset="1" stop-color="#6ee7b7"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#10b981" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#10b981" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <g fill="#1c3a2e">
+    <circle cx="120" cy="80" r="3"/><circle cx="320" cy="560" r="3"/>
+    <circle cx="700" cy="70" r="3"/><circle cx="1120" cy="520" r="3"/>
+    <circle cx="1040" cy="90" r="3"/><circle cx="80" cy="470" r="3"/>
+  </g>
+
+  <g font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+    <text x="92" y="210" font-size="22" font-weight="700" letter-spacing="3" fill="#10b981">GO CLI &#183; COMPONENT TESTING</text>
+    <text x="86" y="352" font-size="148" font-weight="800" fill="#e8f5ef" font-family="ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace">gtool</text>
+    <text x="92" y="412" font-size="30" fill="#9fbcae">Mocks, app, tests and cleanup in one command</text>
+  </g>
+
+  <!-- pipeline pills: the last one marks the stress mode -->
+  <g font-family="ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace" font-size="19" fill="#cdeee0">
+    <rect x="92"  y="452" width="104" height="44" rx="22" fill="#0f2119" stroke="#24463a" stroke-width="2"/>
+    <text x="144" y="480" text-anchor="middle">Mocks</text>
+    <rect x="224" y="452" width="80" height="44" rx="22" fill="#0f2119" stroke="#24463a" stroke-width="2"/>
+    <text x="264" y="480" text-anchor="middle">App</text>
+    <rect x="332" y="452" width="104" height="44" rx="22" fill="#0f2119" stroke="#10b981" stroke-width="2"/>
+    <text x="384" y="480" text-anchor="middle" fill="#6ee7b7">Tests</text>
+    <rect x="464" y="452" width="116" height="44" rx="22" fill="#0f2119" stroke="#24463a" stroke-width="2"/>
+    <text x="522" y="480" text-anchor="middle">Report</text>
+    <rect x="608" y="452" width="128" height="44" rx="22" fill="#0f2119" stroke="#24463a" stroke-width="2"/>
+    <text x="672" y="480" text-anchor="middle">Cleanup</text>
+  </g>
+
+  <g fill="none" stroke="#4f7a69" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 203 474 H 216 M 211 469 L 217 474 L 211 479"/>
+    <path d="M 311 474 H 324 M 319 469 L 325 474 L 319 479"/>
+    <path d="M 443 474 H 456 M 451 469 L 457 474 L 451 479"/>
+    <path d="M 587 474 H 600 M 595 469 L 601 474 L 595 479"/>
+  </g>
+
+  <g transform="translate(958,322) scale(0.82)">
+    <circle r="290" fill="url(#glow)"/>
+    <path d="M -90.6 40 L -138 118 Q -150 150 -114 150 L 114 150 Q 150 150 138 118 L 90.6 40 Z"
+          fill="#10b981" fill-opacity="0.28"/>
+    <path d="M -36 -150 L -36 -50 L -138 118 Q -150 150 -114 150 L 114 150 Q 150 150 138 118 L 36 -50 L 36 -150"
+          fill="none" stroke="url(#green)" stroke-width="22" stroke-linejoin="round"/>
+    <path d="M -60 -150 L 60 -150" stroke="url(#green)" stroke-width="22" stroke-linecap="round"/>
+    <circle cx="12" cy="-82" r="9" fill="#6ee7b7"/>
+    <circle cx="-10" cy="-114" r="6" fill="#6ee7b7" fill-opacity="0.7"/>
+    <path d="M -62 72 L -18 114 L 70 6"
+          fill="none" stroke="#e8f5ef" stroke-width="22"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

@@ -29,7 +29,7 @@ The Karate launcher image is not published to a registry; build it once per mach
 
 ```bash
 docker build -t gtool/test-launcher-back:latest \
-  https://github.com/oswaldom-code/gtool.git#main:test-launcher
+  https://github.com/oswaldom-code/gtool.git#v1.0.0:test-launcher
 ```
 
 ## 3. Wire gtool into the user's service
@@ -90,7 +90,7 @@ GitHub Actions:
 - uses: actions/setup-go@v5
   with: { go-version: "1.26" }
 - run: go install github.com/oswaldom-code/gtool/cmd/gtool@latest
-- run: docker build -t gtool/test-launcher-back:latest https://github.com/oswaldom-code/gtool.git#main:test-launcher
+- run: docker build -t gtool/test-launcher-back:latest https://github.com/oswaldom-code/gtool.git#v1.0.0:test-launcher
 - run: docker build -t my-service:latest .
 - run: gtool test
   env: { GTOOL_RUN_ID: "gh-${{ github.run_id }}" }

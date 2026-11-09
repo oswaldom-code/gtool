@@ -1,6 +1,6 @@
 # Tests unitarios
 
-`gtool unit` reproduce el flujo heredado `legacy-tool u` para servicios en Go:
+`gtool unit` ejecuta los tests unitarios de un servicio en Go:
 
 1. Genera con mockgen los mocks declarados en `build-config.yml`.
 2. Ejecuta la suite de tests unitarios de forma recursiva con Ginkgo, generando un
@@ -29,8 +29,7 @@ Estos placeholders se expanden a rutas de la caché de módulos de Go:
 | Placeholder | Se expande a |
 |---|---|
 | `<LIB-ROOT>` | la raíz de la caché de módulos (`go env GOMODCACHE`) |
-| `<COMMON-LIB>` | el directorio del módulo `shared-lib` en la lista de build |
-| `<SEARCH-LIB>`, `<BUSINESS-LIB>`, `<ANALYTICS-LIB>`, `<BACKOFFICE-LIB>` | lo mismo para `search-lib`, `business-lib`, `analytics-lib`, `backoffice-lib` |
+| `<MOD:nombre>` | el directorio del módulo de la lista de build cuya ruta es `nombre` o termina en `/nombre`, p. ej. `<MOD:shared-lib>/publisher.go` o `<MOD:example.com/acme/shared-lib>/publisher.go` |
 
 `gtool unit` necesita acceso a la red la primera vez: ejecuta `go mod download` e
 instala con `go install` las herramientas fijadas que se indican abajo.
@@ -39,4 +38,4 @@ instala con `go install` las herramientas fijadas que se indican abajo.
 
 mockgen (`go.uber.org/mock/mockgen@v0.3.0`) y la CLI de Ginkgo
 (`github.com/onsi/ginkgo/v2/ginkgo@v2.2.0`) tienen la versión fijada para que los
-mocks generados y los flags de Ginkgo sean idénticos a los de la herramienta heredada.
+mocks generados y los flags de Ginkgo sean idénticos en todas las máquinas.

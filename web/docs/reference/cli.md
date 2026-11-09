@@ -34,7 +34,7 @@ Runs the full component pipeline. See [Component pipeline](../guides/pipeline.md
 | `--features` | override `test-config.features-path` |
 | `--reports` | override `test-config.reports-path` |
 | `--image` | override the launcher image |
-| `--stable` | legacy runner: fixed `test/component/{features,reports}`, opens the report |
+| `--stable` | fixed-contract runner: fixed `test/component/{features,reports}`, opens the report |
 | `--urls-to-block`, `--no-open` | options for `--stable` (require it) |
 
 Without `--stable` it needs a configuration file with explicit ports (no `auto`).

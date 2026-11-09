@@ -1,9 +1,7 @@
 # gtool test-launcher
 
 Karate-based backend test launcher image used by `gtool` to run component tests
-against an already-running app and its mocks. This is the open, in-repo
-replacement for the legacy private `test-launcher-back` image — a "swiss-army"
-launcher with helpers for the datastores, messaging systems, object storage and
+against an already-running app and its mocks: a "swiss-army" launcher with helpers for the datastores, messaging systems, object storage and
 test utilities a component test typically needs.
 
 ## What it is
@@ -76,7 +74,7 @@ matched offset).
 | Features (bind, ro) | `/app/features` |
 | Reports (bind) | `/app/target/karate-reports` (HTML: `karate-summary.html`) |
 | Entry | `CMD ["bash","-c","./scripts/run.bash"]` |
-| Env | `TAGS`, `PUBSUB_EMULATOR_HOST`, `GTOOL_APP_URL`, `GTOOL_<SVC>_PORT`, `GTOOL_<SVC>_{USER,PASSWORD,DATABASE}`, `MVN_ONLINE` (allow Maven downloads; offline by default), `DEBUG`. `URLS_TO_BLOCK` is accepted for the legacy contract but ignored |
+| Env | `TAGS`, `PUBSUB_EMULATOR_HOST`, `GTOOL_APP_URL`, `GTOOL_<SVC>_PORT`, `GTOOL_<SVC>_{USER,PASSWORD,DATABASE}`, `MVN_ONLINE` (allow Maven downloads; offline by default), `DEBUG`. `URLS_TO_BLOCK` is accepted but ignored |
 | Network | host |
 | User | invoking host user (`uid:gid`), so reports are owned by it |
 | Pass/fail | container exit code |

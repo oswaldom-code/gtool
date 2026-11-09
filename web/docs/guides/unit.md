@@ -1,6 +1,6 @@
 # Unit tests
 
-`gtool unit` reproduces the legacy `legacy-tool u` workflow for Go services:
+`gtool unit` runs the unit tests of a Go service:
 
 1. Generates the mocks declared in `build-config.yml` with mockgen.
 2. Runs the unit-test suite recursively with Ginkgo, producing a coverage profile
@@ -29,8 +29,7 @@ expand to paths in the Go module cache:
 | Placeholder | Expands to |
 |---|---|
 | `<LIB-ROOT>` | the module cache root (`go env GOMODCACHE`) |
-| `<COMMON-LIB>` | the directory of the `shared-lib` module in the build list |
-| `<SEARCH-LIB>`, `<BUSINESS-LIB>`, `<ANALYTICS-LIB>`, `<BACKOFFICE-LIB>` | the same for `search-lib`, `business-lib`, `analytics-lib`, `backoffice-lib` |
+| `<MOD:name>` | the directory of the module in the build list whose path is `name` or ends with `/name`, e.g. `<MOD:shared-lib>/publisher.go` or `<MOD:example.com/acme/shared-lib>/publisher.go` |
 
 `gtool unit` needs network access the first time: it runs `go mod download` and
 installs the pinned tools below with `go install`.
@@ -39,4 +38,4 @@ installs the pinned tools below with `go install`.
 
 mockgen (`go.uber.org/mock/mockgen@v0.3.0`) and the Ginkgo CLI
 (`github.com/onsi/ginkgo/v2/ginkgo@v2.2.0`) are pinned so the generated mocks and
-the Ginkgo flags stay identical to the legacy tool.
+the Ginkgo flags stay identical across machines.

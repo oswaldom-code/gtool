@@ -1,6 +1,6 @@
-// Package unit reproduces the behaviour of the legacy "legacy-tool u" command:
-// it generates mocks declared in build-config.yml and runs the unit-test
-// suite with Ginkgo, producing a coverage profile and a JUnit report.
+// Package unit implements gtool unit: it generates the mocks declared in
+// build-config.yml and runs the unit-test suite with Ginkgo, producing a
+// coverage profile and a JUnit report.
 package unit
 
 import (
@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -23,22 +24,18 @@ const (
 	mocksFolder        = "mocks"
 	coverFolder        = "coverage"
 
-	// Tool versions are pinned to match the legacy legacy-tool behaviour so the
-	// generated mocks and the Ginkgo CLI flags stay identical.
+	// Tool versions are pinned so the generated mocks and the Ginkgo CLI flags
+	// stay identical across machines.
 	mockgenURL = "go.uber.org/mock/mockgen@v0.3.0"
 	ginkgoURL  = "github.com/onsi/ginkgo/v2/ginkgo@v2.2.0"
 )
 
-// libWildcards maps the placeholders used in build-config.yml mock sources to
-// the go.mod module substring used to resolve their path in the module cache.
-// <LIB-ROOT> is handled separately because it expands to the module cache root.
-var libWildcards = map[string]string{
-	"<COMMON-LIB>":     "shared-lib",
-	"<SEARCH-LIB>":     "search-lib",
-	"<BUSINESS-LIB>":   "business-lib",
-	"<ANALYTICS-LIB>":  "analytics-lib",
-	"<BACKOFFICE-LIB>": "backoffice-lib",
-}
+// modRoot expands to the Go module cache root in mock sources.
+const modRoot = "<LIB-ROOT>"
+
+// modPlaceholder matches <MOD:name>, which expands to the directory of the
+// module in the build list whose path is name or ends with "/"+name.
+var modPlaceholder = regexp.MustCompile(`<MOD:([^<>]+)>`)
 
 // buildConfig is the minimal view of build-config.yml needed for unit tests.
 type buildConfig struct {
@@ -59,7 +56,7 @@ func NewUnitCmd() *cobra.Command {
 		Use:     "unit",
 		Aliases: []string{"u"},
 		Short:   "Run unit tests (mock generation + Ginkgo)",
-		Long: `Reproduces the legacy "legacy-tool u" workflow:
+		Long: `Run the unit tests of a Go service:
 
   1. Generates the mocks declared in build-config.yml (mockgen).
   2. Runs the unit-test suite recursively with Ginkgo, generating a
@@ -111,8 +108,8 @@ func loadBuildConfig(path string) (*buildConfig, error) {
 	return cfg, nil
 }
 
-// buildMocks reproduces legacy-tool's build_mocks: it resolves library wildcards and
-// runs mockgen for every declared interface.
+// buildMocks resolves module placeholders and runs mockgen for every declared
+// interface.
 func buildMocks(gobin string, mocks []mockSpec) error {
 	if len(mocks) == 0 {
 		return nil
@@ -189,7 +186,7 @@ var listModules = func() (map[string]string, error) {
 }
 
 // moduleDir returns the directory of the module whose path is name or ends
-// with "/"+name, so search-lib never matches search-lib-v2.
+// with "/"+name, so foo-library never matches foo-library-v2.
 func moduleDir(name string, modules map[string]string) (string, error) {
 	paths := make([]string, 0, len(modules))
 	for path := range modules {
@@ -208,28 +205,27 @@ func moduleDir(name string, modules map[string]string) (string, error) {
 	return "", gtErrors.New(gtErrors.ErrConfigInvalid, fmt.Sprintf("module %q not found in the build list", name))
 }
 
-// resolveSource expands library wildcards in a mock source path to an absolute
-// path inside the Go module cache, mirroring legacy-tool's wildcard handling.
+// resolveSource expands <LIB-ROOT> and <MOD:name> placeholders in a mock
+// source path to absolute paths inside the Go module cache.
 func resolveSource(source, modCache string, modules map[string]string) (string, error) {
-	if strings.Contains(source, "<LIB-ROOT>") {
-		source = strings.ReplaceAll(source, "<LIB-ROOT>", modCache)
-	}
+	source = strings.ReplaceAll(source, modRoot, modCache)
 
-	for wildcard, module := range libWildcards {
-		if !strings.Contains(source, wildcard) {
-			continue
+	var resolveErr error
+	source = modPlaceholder.ReplaceAllStringFunc(source, func(match string) string {
+		name := modPlaceholder.FindStringSubmatch(match)[1]
+		dir, err := moduleDir(name, modules)
+		if err != nil && resolveErr == nil {
+			resolveErr = err
 		}
-		dir, err := moduleDir(module, modules)
-		if err != nil {
-			return "", err
-		}
-		source = strings.ReplaceAll(source, wildcard, dir)
+		return dir
+	})
+	if resolveErr != nil {
+		return "", resolveErr
 	}
-
 	return source, nil
 }
 
-// execUnitTests reproduces legacy-tool's exec_unit_tests Ginkgo invocation.
+// execUnitTests runs the suite recursively with Ginkgo.
 func execUnitTests(gobin string) error {
 	if err := installTool(gobin, ginkgoURL); err != nil {
 		return err
@@ -259,8 +255,8 @@ func execUnitTests(gobin string) error {
 	return nil
 }
 
-// installTool runs `go install <url>` so the pinned tool version is available,
-// matching legacy-tool. A failure is fatal because the exact version is required.
+// installTool runs `go install <url>` so the pinned tool version is available.
+// A failure is fatal because the exact version is required.
 func installTool(gobin, url string) error {
 	if err := runStreaming("", nil, "go", "install", url); err != nil {
 		return gtErrors.Wrap(err, gtErrors.ErrInvalidArgument,

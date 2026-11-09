@@ -90,7 +90,7 @@ Whatever is started is always cleaned up, including on Ctrl-C.`,
 	}
 
 	cfgFile = configFile
-	cmd.Flags().BoolVar(&stableMode, "stable", false, "reproduce legacy 'component t' using STABLE mocks + native app + Karate")
+	cmd.Flags().BoolVar(&stableMode, "stable", false, "fixed-contract mode: fixed mocks + native app + Karate")
 	cmd.Flags().StringVar(&stableTags, "tags", "", "Karate tags filter (overrides test-config.tags)")
 	cmd.Flags().StringVar(&stableBuildConfig, "build-config", "build-config.yml", "path to build-config.yml (with --stable)")
 	cmd.Flags().BoolVar(&stableNoOpen, "no-open", false, "do not open the HTML report when finished (with --stable)")
@@ -134,8 +134,8 @@ func defaultKarateRunner(image string, log *zap.Logger) (karateRunner, func() er
 }
 
 // newKarateCmd builds `gtool test karate`: it runs the Karate launcher against
-// mocks and app that are already running. With --stable it reproduces the
-// legacy "component e" (exec-only-tests).
+// mocks and app that are already running. With --stable it uses the
+// fixed-contract runner.
 func newKarateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "karate",
@@ -149,7 +149,7 @@ Bring the environment up first with:
   gtool services up
   gtool app start
 
-With --stable it reproduces the legacy "component e" instead: it mounts
+With --stable it uses the fixed-contract runner instead: it mounts
 test/component/features, writes test/component/reports and opens the report.
 Pair it with:
   gtool services up --stable
@@ -160,7 +160,7 @@ Pair it with:
 	cmd.Flags().StringVar(&karateFeatures, "features", "", "features path (overrides test-config.features-path)")
 	cmd.Flags().StringVar(&karateReports, "reports", "", "reports path (overrides test-config.reports-path)")
 	cmd.Flags().StringVar(&karateImage, "image", "", "override the test launcher image")
-	cmd.Flags().BoolVar(&karateStable, "stable", false, "reproduce legacy 'component e' against STABLE mocks + native app")
+	cmd.Flags().BoolVar(&karateStable, "stable", false, "fixed-contract runner, paired with services up --stable + app start --native")
 	cmd.Flags().StringVar(&karateUrlsToBlock, "urls-to-block", "", "comma-separated URLs to block (with --stable)")
 	cmd.Flags().BoolVar(&karateNoOpen, "no-open", false, "do not open the HTML report when finished (with --stable)")
 	return cmd
@@ -343,7 +343,7 @@ func runTest(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// runStableTest reproduces the legacy "component t": prepare STABLE mocks,
+// runStableTest runs the fixed-contract mode: prepare the fixed mocks,
 // launch the native app, run Karate, then always tear app and mocks down
 // (LIFO defers run even on test failure or Ctrl-C).
 func runStableTest(ctx context.Context, log *zap.Logger, cfg *config.Config) error {
@@ -366,7 +366,7 @@ func runStableTest(ctx context.Context, log *zap.Logger, cfg *config.Config) err
 	}
 	karate := stablekarate.New(dockerClient, log)
 
-	termout.Println("▶ Phase 1/3: starting STABLE mocks...")
+	termout.Println("▶ Phase 1/3: starting fixed-contract mocks...")
 	if err := mocks.Up(ctx, nil, cfg); err != nil {
 		_ = mocks.Down(context.Background(), nil)
 		return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to start mocks")

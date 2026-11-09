@@ -66,7 +66,7 @@ polls its `health-path`. `internal/core/app/nativeapp` launches the
 
 `gtool test --stable` composes its own packages instead of the orchestrator:
 `internal/core/mock/stablemocks` (fixed-contract mocks), `internal/core/app/nativeapp`
-and `internal/core/test/stablekarate` (the legacy Karate contract).
+and `internal/core/test/stablekarate` (the fixed-contract Karate runner).
 
 ## Cross-cutting
 

@@ -53,7 +53,7 @@ reach every run.
 ## As native processes
 
 `gtool app start --native` launches the binaries declared in `build-config.yml` as
-detached processes, like the legacy `component r`:
+detached processes:
 
 ```yaml
 build:

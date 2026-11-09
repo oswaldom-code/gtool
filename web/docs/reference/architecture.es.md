@@ -67,7 +67,7 @@ sondea su `health-path`. `internal/core/app/nativeapp` lanza los binarios de
 
 `gtool test --stable` compone sus propios paquetes en lugar del orquestador:
 `internal/core/mock/stablemocks` (mocks de contrato fijo), `internal/core/app/nativeapp`
-e `internal/core/test/stablekarate` (el contrato heredado de Karate).
+e `internal/core/test/stablekarate` (el runner de Karate de contrato fijo).
 
 ## Aspectos transversales
 

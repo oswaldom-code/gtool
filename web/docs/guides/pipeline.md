@@ -84,14 +84,13 @@ prints the path of the HTML report. It accepts:
 | `--features` | features path (overrides `test-config.features-path`) |
 | `--reports` | reports path (overrides `test-config.reports-path`) |
 | `--image` | override the launcher image |
-| `--stable` | legacy `component e` runner, see below |
+| `--stable` | fixed-contract runner, see below |
 | `--urls-to-block` | with `--stable`; accepted for compatibility, ignored by the gtool launcher |
 | `--no-open` | with `--stable`; do not open the HTML report |
 
 ## Stable mode
 
-`gtool test --stable` reproduces the legacy `component t` flow with a fixed
-contract: the `postgresql`, `pubsub` and `mountebank` mocks on official public
+`gtool test --stable` runs the pipeline with a fixed contract: the `postgresql`, `pubsub` and `mountebank` mocks on official public
 images seeded from `test/component/mocks-data`, the app binaries declared in
 `build-config.yml` launched as native processes, then Karate.
 

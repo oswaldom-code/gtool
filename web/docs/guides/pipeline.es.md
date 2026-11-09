@@ -91,13 +91,13 @@ la ruta del reporte HTML. Acepta:
 | `--features` | ruta de las features (sobrescribe `test-config.features-path`) |
 | `--reports` | ruta de los reportes (sobrescribe `test-config.reports-path`) |
 | `--image` | sobrescribe la imagen del launcher |
-| `--stable` | runner heredado de `component e`, ver abajo |
+| `--stable` | runner de contrato fijo, ver abajo |
 | `--urls-to-block` | con `--stable`; se acepta por compatibilidad, el launcher de gtool lo ignora |
 | `--no-open` | con `--stable`; no abre el reporte HTML |
 
 ## Modo estable
 
-`gtool test --stable` reproduce el flujo heredado `component t` con un contrato fijo:
+`gtool test --stable` ejecuta el pipeline con un contrato fijo:
 los mocks `postgresql`, `pubsub` y `mountebank` sobre imágenes públicas oficiales,
 cargados desde `test/component/mocks-data`, los binarios de la app declarados en
 `build-config.yml` lanzados como procesos nativos y, después, Karate.

@@ -9,7 +9,7 @@ import (
 )
 
 // detachAttr puts the binary in its own process group so it survives the gtool
-// process exit, matching the legacy launcher's backgrounded "&" binaries.
+// process exit.
 func detachAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setpgid: true}
 }

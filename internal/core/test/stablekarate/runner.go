@@ -1,7 +1,7 @@
-// Package stablekarate reproduces the launch_tests
-// step: it runs the test-launcher-back (Karate) STABLE image on the host
-// network against the already-running app and mocks, mounting the feature files
-// and writing the HTML report to the host, and can open that report in a browser.
+// Package stablekarate runs the Karate launcher for the fixed-contract mode: it
+// runs the image on the host network against the already-running app and
+// mocks, mounting test/component/features and writing the HTML report to the
+// host, and can open that report in a browser.
 package stablekarate
 
 import (
@@ -52,7 +52,7 @@ type DockerClient interface {
 
 // Options configures a Karate run.
 type Options struct {
-	Image        string // defaults to the STABLE test-launcher-back image
+	Image        string // defaults to the gtool test-launcher-back image
 	Tags         string
 	UrlsToBlock  string
 	FeaturesPath string // defaults to test/component/features
@@ -84,7 +84,7 @@ func New(d DockerClient, logger *zap.Logger) *Runner {
 }
 
 // Run executes the Karate suite and returns the result. It assumes the mocks
-// and app are already running (like the legacy "component e").
+// and app are already running.
 func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	image := opts.Image
 	if image == "" {

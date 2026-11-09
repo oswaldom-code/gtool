@@ -6,7 +6,7 @@ import java.util.Map;
 /**
  * Resolves the host ports of the current gtool run. gtool injects
  * GTOOL_&lt;SERVICE&gt;_PORT (and GTOOL_APP_URL) into the launcher; without them
- * the legacy fixed defaults apply, so existing setups keep working.
+ * the plugin defaults apply.
  * Exposed to Karate via Java.type.
  */
 public final class RunPorts {

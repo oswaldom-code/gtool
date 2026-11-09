@@ -35,7 +35,7 @@ Flags de `gtool test karate`:
 | `--features` | sobrescribe `test-config.features-path` |
 | `--reports` | sobrescribe `test-config.reports-path` |
 | `--image` | sobrescribe la imagen del launcher |
-| `--stable` | runner heredado: `test/component/{features,reports}` fijos, abre el reporte |
+| `--stable` | runner de contrato fijo: `test/component/{features,reports}` fijos, abre el reporte |
 | `--urls-to-block`, `--no-open` | opciones de `--stable` (lo requieren) |
 
 Sin `--stable` necesita un archivo de configuración con puertos explícitos (sin `auto`).

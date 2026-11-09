@@ -56,7 +56,7 @@ contenedores sin ejecución; añade `--all-runs` para alcanzar todas.
 ## Como procesos nativos
 
 `gtool app start --native` lanza los binarios declarados en `build-config.yml` como
-procesos desacoplados, igual que el antiguo `component r`:
+procesos desacoplados:
 
 ```yaml
 build:

@@ -113,7 +113,7 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 
 // ImageExists reports whether an image is already present in the local Docker
 // image store, so callers can avoid a registry pull for local-only images
-// (e.g. private STABLE images or freshly built ones).
+// (e.g. freshly built ones).
 func (c *Client) ImageExists(ctx context.Context, imageName string) (bool, error) {
 	_, _, err := c.cli.ImageInspectWithRaw(ctx, imageName)
 	if err != nil {

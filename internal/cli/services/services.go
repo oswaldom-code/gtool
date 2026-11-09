@@ -485,7 +485,7 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
-// newStableLauncher builds a Docker-backed STABLE-mode launcher and verifies
+// newStableLauncher builds a Docker-backed fixed-contract launcher and verifies
 // the Docker daemon is reachable. The caller is responsible for closing the
 // returned client.
 func newStableLauncher(ctx context.Context, log *zap.Logger) (*stablemocks.Launcher, *docker.Client, error) {
@@ -516,7 +516,7 @@ func runStableUp(ctx context.Context, log *zap.Logger, args []string, cfg *confi
 		return err
 	}
 
-	termout.Printf("\n✨ STABLE mocks started! Use 'gtool s down --stable' to stop them.\n")
+	termout.Printf("\n✨ Fixed-contract mocks started! Use 'gtool s down --stable' to stop them.\n")
 	return nil
 }
 
@@ -531,6 +531,6 @@ func runStableDown(ctx context.Context, log *zap.Logger, args []string) error {
 		return err
 	}
 
-	termout.Println("✨ STABLE mocks stopped")
+	termout.Println("✨ Fixed-contract mocks stopped")
 	return nil
 }

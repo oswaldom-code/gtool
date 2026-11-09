@@ -48,9 +48,9 @@ func TestLoadBuildConfig(t *testing.T) {
 }
 
 var sampleModules = map[string]string{
-	"example.com/acme/shared-lib": "/cache/example.com/acme/shared-lib@v1.45.0",
-	"example.com/acme/search-lib-v2":   "/cache/search-lib-v2@v2.0.0",
-	"github.com/!some!org/business-lib":                  "",
+	"example.com/acme/shared-lib":       "/cache/example.com/acme/shared-lib@v1.45.0",
+	"example.com/acme/search-lib-v2":    "/cache/example.com/acme/search-lib-v2@v2.0.0",
+	"github.com/!some!org/business-lib": "",
 }
 
 func TestResolveSource(t *testing.T) {
@@ -64,12 +64,17 @@ func TestResolveSource(t *testing.T) {
 		errContains string
 	}{
 		{
-			name:   "common-lib wildcard",
-			source: "<COMMON-LIB>/messaging/publisher/publisher_interface.go",
+			name:   "module placeholder by last path element",
+			source: "<MOD:shared-lib>/messaging/publisher/publisher_interface.go",
 			want:   "/cache/example.com/acme/shared-lib@v1.45.0/messaging/publisher/publisher_interface.go",
 		},
 		{
-			name:   "lib-root wildcard",
+			name:   "module placeholder by full path",
+			source: "<MOD:example.com/acme/search-lib-v2>/foo.go",
+			want:   "/cache/example.com/acme/search-lib-v2@v2.0.0/foo.go",
+		},
+		{
+			name:   "lib-root placeholder",
 			source: "<LIB-ROOT>/some/path.go",
 			want:   filepath.Join(modCache, "some/path.go"),
 		},
@@ -80,13 +85,13 @@ func TestResolveSource(t *testing.T) {
 		},
 		{
 			name:        "a longer module name with the same prefix does not match",
-			source:      "<SEARCH-LIB>/foo.go",
+			source:      "<MOD:search-lib>/foo.go",
 			wantErr:     true,
 			errContains: "search-lib",
 		},
 		{
 			name:        "module in the build list but not downloaded",
-			source:      "<BUSINESS-LIB>/foo.go",
+			source:      "<MOD:business-lib>/foo.go",
 			wantErr:     true,
 			errContains: "not downloaded",
 		},
@@ -108,7 +113,7 @@ func TestResolveSource(t *testing.T) {
 
 func TestUsesWildcards(t *testing.T) {
 	assert.False(t, usesWildcards([]mockSpec{{Source: "internal/a.go"}}))
-	assert.True(t, usesWildcards([]mockSpec{{Source: "internal/a.go"}, {Source: "<COMMON-LIB>/b.go"}}))
+	assert.True(t, usesWildcards([]mockSpec{{Source: "internal/a.go"}, {Source: "<MOD:shared-lib>/b.go"}}))
 }
 
 func TestListModules_ParsesTheGoCommand(t *testing.T) {

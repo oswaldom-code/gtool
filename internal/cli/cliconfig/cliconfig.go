@@ -27,8 +27,8 @@ var (
 	// Pipeline is for commands that run tests: a silent fallback to defaults
 	// would report success without testing anything.
 	Pipeline = Policy{Required: true, Validate: true, CheckPaths: true}
-	// Compat is for the legacy --stable flow, whose configs follow the fixed
-	// contract and do not satisfy the gtool validator.
+	// Compat is for the --stable flow, whose configs follow the fixed
+	// contract and need not satisfy the gtool validator.
 	Compat = Policy{Required: true}
 	// Start is for commands that start containers from an optional config.
 	Start = Policy{Validate: true}

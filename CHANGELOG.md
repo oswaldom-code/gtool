@@ -33,8 +33,8 @@ First stable release. Documentation: https://oswaldom-code.github.io/gtool/
 ### Changed
 
 - `gtool test karate` uses the same runner as `gtool test`: it reads
-  `test-config` and the configured ports. The legacy behaviour moved behind
-  `--stable`; `--urls-to-block` and `--no-open` only apply there.
+  `test-config` and the configured ports. The fixed-contract runner moved
+  behind `--stable`; `--urls-to-block` and `--no-open` only apply there.
 - `gtool test` fails without a config file, with an invalid config, without
   `test-config.features-path` or when zero scenarios run.
 - Test counts come from the Karate scenario summary.

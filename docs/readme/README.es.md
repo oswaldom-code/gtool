@@ -153,7 +153,7 @@ gtool test                            # pipeline nativo de gtool (imágenes púb
 gtool test --stable --tags "@smoke"   # mocks de contrato fijo + app nativa + Karate
 gtool test karate                     # solo Karate (mocks y app ya levantados, puertos explícitos)
 gtool test karate --tags "@smoke" --reports ./out
-gtool test karate --stable --no-open  # component e heredado contra services up --stable + app start --native
+gtool test karate --stable --no-open  # runner de contrato fijo, tras services up --stable + app start --native
 ```
 `gtool test karate` lee `test-config` y los puertos del archivo de configuración igual que `gtool test`; `--tags`, `--features` y `--reports` los sobrescriben, e `--image` sobrescribe la imagen del launcher. `--urls-to-block` y `--no-open` solo aplican con `--stable`.
 
@@ -207,7 +207,7 @@ third-party:
 ```
 Las claves desconocidas en `mock-config`, los puertos inválidos y dos claves de puerto de un mismo mock en el mismo puerto de host son errores de validación.
 
-El modo `--stable` lee los topics de Pub/Sub con el formato legacy:
+El modo `--stable` lee los topics de Pub/Sub con su propio formato:
 ```yaml
     pubsub:
       project-id: my-project

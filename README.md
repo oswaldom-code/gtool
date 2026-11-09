@@ -153,7 +153,7 @@ gtool test                            # gtool-native pipeline (public images); -
 gtool test --stable --tags "@smoke"   # fixed-contract mocks + native app + Karate
 gtool test karate                     # Karate only (mocks and app already up, explicit ports)
 gtool test karate --tags "@smoke" --reports ./out
-gtool test karate --stable --no-open  # legacy component e against services up --stable + app start --native
+gtool test karate --stable --no-open  # fixed-contract runner, after services up --stable + app start --native
 ```
 `gtool test karate` reads `test-config` and the ports of the config file like `gtool test`; `--tags`, `--features` and `--reports` override it, and `--image` overrides the launcher image. `--urls-to-block` and `--no-open` only apply with `--stable`.
 
@@ -207,7 +207,7 @@ third-party:
 ```
 Unknown `mock-config` keys, invalid ports and two port keys of one mock on the same host port are validation errors.
 
-`--stable` mode reads Pub/Sub topics in the legacy layout instead:
+`--stable` mode reads Pub/Sub topics in its own layout instead:
 ```yaml
     pubsub:
       project-id: my-project

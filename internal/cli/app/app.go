@@ -112,14 +112,14 @@ func newStartCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dockerImage, "docker-image", "", "Docker image to run (overrides config)")
 	cmd.Flags().IntVar(&appPort, "port", 0, "application port (overrides config)")
 	cmd.Flags().StringToStringVar(&appEnv, "env", nil, "environment variables (KEY=VALUE)")
-	cmd.Flags().BoolVar(&nativeMode, "native", false, "launch the build-config binaries as native processes (like legacy 'component r')")
+	cmd.Flags().BoolVar(&nativeMode, "native", false, "launch the build-config binaries as native processes")
 	cmd.Flags().StringVar(&buildConfigFile, "build-config", "build-config.yml", "path to build-config.yml (with --native)")
 	return cmd
 }
 
 func newStopCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "stop", Short: "Stop the application", RunE: runStop}
-	cmd.Flags().BoolVar(&nativeMode, "native", false, "stop the native build-config binaries (like legacy 'component p')")
+	cmd.Flags().BoolVar(&nativeMode, "native", false, "stop the native build-config binaries")
 	cmd.Flags().StringVar(&buildConfigFile, "build-config", "build-config.yml", "path to build-config.yml (with --native)")
 	return cmd
 }

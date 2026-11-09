@@ -146,8 +146,8 @@ Run `gtool stress plan` first to check the resolved targets.
 but cannot share `auto` ports: use fixed ports there. Without `GTOOL_RUN_ID` they act only
 on containers that belong to no run; `--all-runs` widens them.
 
-## Legacy flows
+## Fixed-contract mode
 
-`--stable` (on `test`, `services up`) and `--native` (on `app`) reproduce the legacy
-`legacy-tool component` contract with `build-config.yml` and native binaries. Use them only
-when migrating a service that already has that setup; new services use the default pipeline.
+`--stable` (on `test`, `test karate`, `services up/down`) and `--native` (on `app`) run
+fixed mocks (`postgresql`, `pubsub`, `mountebank` on fixed ports) and the binaries in
+`build-config.yml` as native processes. Prefer the default pipeline for new services.

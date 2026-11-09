@@ -1,7 +1,6 @@
-// Package nativeapp reproduces the golang app
-// launcher (app-launchers/golang.bash, no docker image): it starts the project
-// binaries built into $GOPATH/bin as detached native processes, each on an
-// incrementing port with the emulator host env vars, and stops them by name.
+// Package nativeapp runs the app under test as native processes: it starts the
+// project binaries built into $GOPATH/bin as detached processes, each on an
+// incrementing port with the emulator host env vars, and stops them again.
 package nativeapp
 
 import (
@@ -29,8 +28,7 @@ const (
 	basePort      = 8080
 	baseExtraPort = 7080
 
-	// Emulator hosts match the legacy launcher's exported PUBSUB/STORAGE values
-	// (the STABLE pubsub/gcs mocks publish on these host ports).
+	// Emulator hosts of the fixed-contract pubsub/gcs mocks.
 	pubsubEmulatorHost  = "127.0.0.1:9085"
 	storageEmulatorHost = "127.0.0.1:9086"
 
@@ -130,7 +128,7 @@ func (l *Launcher) Start(ctx context.Context) error {
 }
 
 // waitForApp polls the primary service port (the first binary's, 8080) until it
-// accepts connections, replacing the legacy blind "sleep 5". If it never comes
+// accepts connections. If it never comes
 // up within readyTimeout it warns and proceeds (best-effort: not every app
 // binds that port).
 func (l *Launcher) waitForApp(ctx context.Context) error {
@@ -186,7 +184,7 @@ func (l *Launcher) Stop(ctx context.Context) error {
 }
 
 // binaries returns the "<app>-<name>" binary names, where <app> is the working
-// directory basename, mirroring legacy-tool's list-binaries.
+// directory basename.
 func (l *Launcher) binaries() ([]string, error) {
 	data, err := os.ReadFile(l.buildConfigPath)
 	if err != nil {
@@ -254,8 +252,8 @@ func (o *osRunner) start(binaryPath string, args, env []string) error {
 }
 
 // commandPattern matches processes whose command line starts with exactly
-// binaryPath, unlike the legacy substring "pkill -f <name>" that also hit
-// editors, "tail -f <name>.log" or "go build -o <path>".
+// binaryPath, so editors, "tail -f <name>.log" or "go build -o <path>" are
+// never hit.
 func commandPattern(binaryPath string) string {
 	return "^" + regexp.QuoteMeta(binaryPath) + "( |$)"
 }

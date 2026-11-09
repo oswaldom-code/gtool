@@ -58,7 +58,7 @@ matched offset).
 | `launcher.pubsub.PubSub` + `launcher.pubsub.operations.*` | Pub/Sub emulator (publish, consume, ordered, find, create topic/subscription) | `PUBSUB_EMULATOR_HOST`, else `GTOOL_PUBSUB_PORT` (8085) |
 | `launcher.gcs.operations.ReadObject` / `DeleteObject` | GCS emulator (fake-gcs-server) | `GTOOL_GCS_PORT` (default 4443) |
 | `launcher.amazon.sqs.operations.PublishSQSMessage` | SQS (publish) | `GTOOL_FLOCI_PORT` (default 4566) |
-| `launcher.s3.S3Client` | S3 / MinIO (put/get/exists/delete); `close()` | from `endpoint` |
+| `launcher.s3.S3Client` | S3 / Floci (put/get/exists/delete); `close()` | from `endpoint` |
 | `launcher.util.Jwt` | generate / verify / inspect HS256 tokens | — |
 | `launcher.util.Faker` | random test data (name/email/uuid/number/expression) | — |
 | `launcher.util.JsonSchema` | JSON Schema (Draft 2020-12) validation | — |

@@ -7,7 +7,6 @@ import (
 	"github.com/oswaldom-code/gtool/internal/plugin/services/floci"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/gcs"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/kafka"
-	"github.com/oswaldom-code/gtool/internal/plugin/services/minio"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/mongodb"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/mountebank"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/mysql"
@@ -24,7 +23,6 @@ func DefaultPorts() map[string]map[string]string {
 		"floci":      floci.DefaultPorts(),
 		"gcs":        gcs.DefaultPorts(),
 		"kafka":      kafka.DefaultPorts(),
-		"minio":      minio.DefaultPorts(),
 		"mongodb":    mongodb.DefaultPorts(),
 		"mountebank": mountebank.DefaultPorts(),
 		"mysql":      mysql.DefaultPorts(),
@@ -42,7 +40,6 @@ func ConfigKeys() map[string][]string {
 		"floci":      floci.ConfigKeys(),
 		"gcs":        gcs.ConfigKeys(),
 		"kafka":      kafka.ConfigKeys(),
-		"minio":      minio.ConfigKeys(),
 		"mongodb":    mongodb.ConfigKeys(),
 		"mountebank": mountebank.ConfigKeys(),
 		"mysql":      mysql.ConfigKeys(),

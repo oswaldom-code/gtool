@@ -53,7 +53,7 @@ test-config:
 third-party:
   # List of services to start
   # Available: postgresql, mysql, mongodb, redis, couchbase, kafka, pubsub,
-  #            gcs, minio, floci, mountebank
+  #            gcs, floci, mountebank
   mocks:
     - postgresql
     # - mountebank

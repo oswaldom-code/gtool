@@ -11,7 +11,6 @@ import (
 	"github.com/oswaldom-code/gtool/internal/plugin/services/floci"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/gcs"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/kafka"
-	"github.com/oswaldom-code/gtool/internal/plugin/services/minio"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/mongodb"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/mountebank"
 	"github.com/oswaldom-code/gtool/internal/plugin/services/mysql"
@@ -34,7 +33,6 @@ func RegisterAll(registry *plugin.Registry, dockerClient *docker.Client, logger 
 		redis.NewRedisPlugin(dockerClient, logger),
 		mongodb.NewMongoDBPlugin(dockerClient, logger),
 		mysql.NewMySQLPlugin(dockerClient, logger),
-		minio.NewMinIOPlugin(dockerClient, logger),
 		floci.NewFlociPlugin(dockerClient, logger),
 	}
 

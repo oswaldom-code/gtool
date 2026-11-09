@@ -5,10 +5,11 @@ app-technology: golang
 app-config:
   docker-image: redis-app:latest
   port: 8080
+  host-port: auto
   environment:
     # The app container reaches the host-published Redis through the host
     # gateway that gtool maps to host.docker.internal.
-    REDIS_ADDR: host.docker.internal:6379
+    REDIS_ADDR: host.docker.internal:${mocks.redis.port}
 
 # Backend API tests (Karate).
 test-launcher: test-launcher-back
@@ -23,4 +24,4 @@ third-party:
     - redis
   mock-config:
     redis:
-      port: "6379"
+      port: auto

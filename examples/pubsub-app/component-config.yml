@@ -5,10 +5,11 @@ app-technology: golang
 app-config:
   docker-image: pubsub-app:latest
   port: 8080
+  host-port: auto
   environment:
     # The app container reaches the host-published emulator through the host
     # gateway that gtool maps to host.docker.internal.
-    PUBSUB_EMULATOR_HOST: host.docker.internal:8085
+    PUBSUB_EMULATOR_HOST: host.docker.internal:${mocks.pubsub.port}
     PUBSUB_PROJECT_ID: test-project
     TOPIC: orders
 
@@ -25,7 +26,7 @@ third-party:
     - pubsub
   mock-config:
     pubsub:
-      port: "8085"
+      port: auto
       project-id: test-project
       topics:
         - orders

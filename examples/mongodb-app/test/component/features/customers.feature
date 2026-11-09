@@ -3,7 +3,7 @@ Feature: Customers stored in MongoDB from data/customers.json
 
   Background:
     * def Mongo = Java.type('launcher.mongo.MongoClient')
-    * def mongo = new Mongo({ connectionString: 'mongodb://localhost:27017', database: 'test' })
+    * def mongo = new Mongo({ database: 'test' })
 
   Scenario: the app inserts every customer from the data file
     * json ada = mongo.findOne('customers', '{"code":"C1"}')

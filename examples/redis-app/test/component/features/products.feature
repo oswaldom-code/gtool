@@ -3,7 +3,7 @@ Feature: Products stored in Redis from data/products.json
 
   Background:
     * def Redis = Java.type('launcher.redis.RedisClient')
-    * def redis = new Redis({ host: 'localhost', port: '6379' })
+    * def redis = new Redis({ host: 'localhost' })
 
   Scenario: the app stores every product from the data file
     * json book = redis.get('product:1')

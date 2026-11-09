@@ -8,12 +8,14 @@
 version: v1
 
 app-technology: golang
+test-launcher: test-launcher-back
 app-config:
   docker-image: postgres-app:latest
   port: 8080
+  host-port: auto
   environment:
     DB_HOST: host.docker.internal
-    DB_PORT: "5432"
+    DB_PORT: "${mocks.postgresql.port}"
     DB_USER: postgres
     DB_PASSWORD: postgres
     DB_NAME: postgres
@@ -23,7 +25,7 @@ third-party:
     - postgresql
   mock-config:
     postgresql:
-      port: "5432"
+      port: auto
       user: postgres
       password: postgres
       database: postgres

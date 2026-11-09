@@ -5,10 +5,11 @@ app-technology: golang
 app-config:
   docker-image: kafka-app:latest
   port: 8080
+  host-port: auto
   environment:
-    # Listener for clients running in containers, advertised by the broker as
-    # host.docker.internal:9094 (the host gateway gtool maps on the app container).
-    KAFKA_BROKERS: host.docker.internal:9094
+    # Listener for clients running in containers, advertised by the broker on
+    # the host gateway gtool maps on the app container.
+    KAFKA_BROKERS: host.docker.internal:${mocks.kafka.docker-port}
     TOPIC: orders
 
 # Backend API tests (Karate).
@@ -24,7 +25,6 @@ third-party:
     - kafka
   mock-config:
     kafka:
-      # The launcher's kafka/*.feature helpers expect the broker on localhost:9092.
-      port: "9092"
+      port: auto
       topics:
         - orders

@@ -3,7 +3,8 @@ Feature: Books stored in MySQL from data/books.json
 
   Background:
     * def MySql = Java.type('launcher.mysql.MySqlClient')
-    * def mysql = new MySql({ url: 'jdbc:mysql://localhost:3306/test', user: 'root', password: 'root' })
+    * def RunPorts = Java.type('launcher.util.RunPorts')
+    * def mysql = new MySql({ url: 'jdbc:mysql://localhost:' + RunPorts.port('mysql', '3306') + '/test', user: 'root', password: 'root' })
 
   Scenario: the app inserts every book from the data file
     * def clrs = mysql.getRow('books', { isbn: '978-0262033848' })

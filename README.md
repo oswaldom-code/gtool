@@ -87,7 +87,7 @@ GTOOL looks for `./component-config.yml` by default. Use `--config <file>` for a
 
 ## 📖 Commands
 
-Every command accepts `--config <file>`, `--log-level debug|info|warn|error` and `--verbose`.
+Every command accepts `--config <file>`, `--log-level debug|info|warn|error` (also `GTOOL_LOG_LEVEL` or `observability.log-level`) and `--verbose` (debug). Output uses symbols only on an interactive terminal; with a pipe, `NO_COLOR` or `CI` it is plain text.
 
 ### `gtool config` — configuration
 ```bash
@@ -101,8 +101,8 @@ gtool config show --format json
 gtool services up                     # starts every mock in the config
 gtool s up postgresql kafka           # starts specific services
 gtool s status                        # services status
-gtool s logs postgresql               # logs of a service
-gtool s down                          # stops all
+gtool s logs postgresql --tail 200 -f # logs of a service; -f follows one service until Ctrl-C (--all for every service)
+gtool s down                          # stops all (only containers without a run ID; --all-runs for every run)
 ```
 
 ### `gtool app` — application under test
@@ -110,6 +110,7 @@ gtool s down                          # stops all
 gtool app start --docker-image myapp:latest --port 8080
 gtool app status
 gtool app logs --tail 100
+gtool app restart                     # --native restarts the native binaries
 gtool app stop
 ```
 
@@ -123,7 +124,7 @@ gtool unit --build-config build-config.yml
 
 ### `gtool test` — component pipeline
 ```bash
-gtool test                            # gtool-native pipeline (public images)
+gtool test                            # gtool-native pipeline (public images); --tags overrides test-config.tags
 gtool test karate                     # Karate only (mocks and app already up)
 gtool test karate --tags "@smoke" --no-open
 ```
@@ -146,22 +147,53 @@ gtool version
 
 ## 🧩 Configuration
 
-GTOOL uses two files (`.yml` extension preferred; `.yaml` supported):
+GTOOL uses two files (`.yml` extension preferred; `.yaml` supported). `${VAR}` and `$VAR` references in values are expanded from the environment after parsing (unset variables are left as written, `$$` is a literal `$`). `gtool test` and `gtool services up` / `app start` validate the file before starting anything; `gtool test` fails when no config file is found.
 
 ### `component-config.yml` — component pipeline
 ```yaml
 version: v1
-app-technology: golang            # golang | nodejs | generic
+app-technology: golang            # golang | generic
+app-config:
+  docker-image: myapp:latest      # the app under test runs as a container
+  port: 8080                      # port the app listens on inside the container
+  host-port: auto                 # free host port per run (omit = same as port)
+  health-path: /health            # polled until it answers before tests run (default /)
+  environment:
+    DB_HOST: host.docker.internal
+    DB_PORT: "${mocks.postgresql.port}"   # this run's mock port
 test-launcher: test-launcher-back
+test-config:
+  features-path: ./test/component/features   # required by gtool test
+  reports-path: ./test/component/reports
 third-party:
-  mocks: [postgresql, pubsub, mountebank]
+  mocks: [postgresql, pubsub]
   mock-config:
+    postgresql:
+      port: auto                  # any port key (port, *-port) accepts auto
+    pubsub:
+      project-id: my-project
+      topics: [my-topic]
+      subscriptions:
+        - name: my-sub
+          topic: my-topic
+```
+Unknown `mock-config` keys, invalid ports and two port keys of one mock on the same host port are validation errors.
+
+`--stable` mode reads Pub/Sub topics in the legacy layout instead:
+```yaml
     pubsub:
       project-id: my-project
       topics:
         - topic-id: my-topic
           subscription-ids: [my-sub]
 ```
+
+### Dynamic ports and concurrent runs
+- `port: auto` (mocks) and `host-port: auto` (app) pick free host ports per run, so several `gtool test` runs share one host (e.g. a CI agent).
+- `${mocks.<service>.<port-key>}`, `${app.port}` and `${app.host-port}` in `app-config.environment` are replaced with this run's values; mocks that do not set a port expose their default.
+- Karate receives `GTOOL_APP_URL`, `GTOOL_<SERVICE>_PORT` and `GTOOL_<SERVICE>_{USER,PASSWORD,DATABASE}`; features use `* url appUrl` and the launcher helpers follow these ports.
+- Every `gtool test` / `gtool stress` run labels and names its containers with a run ID (`GTOOL_RUN_ID`, or a generated one), so one run's teardown never touches another. Without `GTOOL_RUN_ID`, `services` and `app` commands only act on containers of no run; `--all-runs` widens them to every run.
+- `auto` only works in single-invocation pipelines (`gtool test`, `gtool stress`): separate `services up` / `app start` commands cannot share allocated ports and reject it.
 
 ### `stress-config` — stress testing (for `gtool stress`)
 ```yaml
@@ -246,15 +278,14 @@ go test -tags=integration ./internal/plugin/services/...
 ## ⚠️ Known limitations
 
 - **App→mock networking (native `gtool test`).** The default pipeline runs the app as a bridge-network container while the mocks publish their ports on the host, so a containerized app cannot reach a mock at `localhost`. gtool maps `host.docker.internal` to the host gateway on the app container, so point the app at `host.docker.internal:<mock port>` on Linux and Docker Desktop alike. On Linux hosts with a firewall that drops incoming traffic from the Docker bridge (for example ufw with its default policy), allow it with `sudo ufw allow in on docker0`. The `--stable` / `--native` path runs the app as native processes that reach the mocks over `127.0.0.1`.
-- **Newer mock plugins are lightly tested.** `redis`, `mongodb`, `mysql` and `minio` currently have unit tests only — no Docker integration tests yet. Treat them as experimental.
+- **Fixed ports for some mocks.** Mountebank imposter ports come from the imposter files and are published on the same host port (not `auto`); Couchbase's data port must stay 11210 because the cluster advertises its container ports.
 - **Stress results are host-relative.** The load generator, the app and the mocks share the host, so `gtool stress` numbers are for comparing commits, not production capacity estimates; use `--target-url` for serious measurements. Container CPU/memory metrics are not collected yet.
-- **Karate result is exit-code based.** Pass/fail comes from the launcher's exit code; there is no per-scenario parsing of the `karate-reports` output.
 
 ---
 
 ## 📦 Status
 
-Functional end-to-end pipeline: 10 mock plugins, app launcher (Docker and native), Karate runner and orchestration with guaranteed teardown. 185 tests passing.
+Functional end-to-end pipeline: 10 mock plugins, app launcher (Docker and native), Karate runner and orchestration with guaranteed teardown.
 
 | Phase | Status |
 |------|--------|

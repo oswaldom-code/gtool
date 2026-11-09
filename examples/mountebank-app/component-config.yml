@@ -5,6 +5,7 @@ app-technology: golang
 app-config:
   docker-image: mountebank-app:latest
   port: 8080
+  host-port: auto
   environment:
     # The app container reaches the host-published imposter through the host
     # gateway that gtool maps to host.docker.internal.
@@ -23,5 +24,5 @@ third-party:
     - mountebank
   mock-config:
     mountebank:
-      port: "2525"
+      port: auto
       imposters-path: ./test/component/mocks-data/mountebank

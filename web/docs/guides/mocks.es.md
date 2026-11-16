@@ -35,7 +35,7 @@ a medio cargar.
 | `redis` | `redis:7-alpine` | 6379 | `password` |
 | `kafka` | `apache/kafka:3.7.0` | 9092, 9094 | KRaft de un solo nodo; crea `topics` con `partitions`; `docker-port` (por defecto 9094) es el listener que usan los contenedores de la app vía `host.docker.internal`; ponlo también en `auto` para ejecuciones concurrentes |
 | `pubsub` | `gcr.io/google.com/cloudsdktool/cloud-sdk:emulators` | 8085 | `project-id`, `topics`, `subscriptions` |
-| `couchbase` | `couchbase:community-7.6.2` | 8091, 8093, 11210 | `user` (alias `username`), `password`, `bucket`, `services`, `bucket-ram-mb`, `cluster-ram-mb`; puertos vía `admin-port` y `data-port` (debe seguir en 11210); se publica el puerto de query 8093 |
+| `couchbase` | `couchbase:community-7.6.2` | 8091, 8093, 11210 | `user` (alias `username`), `password`, `bucket`, `services`, `bucket-ram-mb`, `cluster-ram-mb`; `scope` y `collections` (lista de `name`) se crean en el bucket; puertos vía `admin-port` y `data-port` (debe seguir en 11210); se publica el puerto de query 8093 |
 | `gcs` | `fsouza/fake-gcs-server:1.49.0` | 4443 | `project-id`, `buckets` |
 | `floci` | `floci/floci:2.3.0` | 4566 | emulador de AWS: `region`, `buckets` de S3, `queues` de SQS |
 | `mountebank` | `bbyars/mountebank:2.9.1` | 2525 | carga los archivos JSON de impostores de `imposters-path` (impostores sueltos o `{"imposters": [...]}`); los puertos de los impostores se publican en el mismo puerto del host, no `auto` |

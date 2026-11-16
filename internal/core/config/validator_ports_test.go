@@ -87,6 +87,18 @@ var _ = Describe("Validator mock-config", func() {
 		})).To(Succeed())
 	})
 
+	It("accepts couchbase scope and collections", func() {
+		Expect(validate(map[string]interface{}{
+			"couchbase": map[string]interface{}{
+				"bucket": "orders",
+				"scope":  "sales",
+				"collections": []interface{}{
+					map[string]interface{}{"name": "orders", "id-pattern": "%order_id%"},
+				},
+			},
+		})).To(Succeed())
+	})
+
 	It("rejects an unknown key", func() {
 		err := validate(map[string]interface{}{"postgresql": map[string]interface{}{"usr": "app"}})
 		Expect(err).To(HaveOccurred())

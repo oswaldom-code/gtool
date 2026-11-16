@@ -39,6 +39,11 @@ func TestCouchbaseIntegration(t *testing.T) {
 		"admin-port": "18091",
 		"data-port":  "11210",
 		"bucket":     "orders",
+		"scope":      "sales",
+		"collections": []interface{}{
+			map[string]interface{}{"name": "invoices"},
+			map[string]interface{}{"name": "refunds", "id-pattern": "%code%"},
+		},
 	}
 
 	log.Info("launching Couchbase for integration test")
@@ -80,6 +85,24 @@ func TestCouchbaseIntegration(t *testing.T) {
 		})
 		require.NoError(t, err, "Failed to list buckets: %s", output)
 		assert.True(t, strings.Contains(output, "orders"), "should list the 'orders' bucket")
+	})
+
+	t.Run("ScopeAndCollectionsCreated", func(t *testing.T) {
+		output, err := dockerClient.ExecInContainer(ctx, plugin.containerID, &docker.ExecConfig{
+			Cmd: []string{
+				couchbaseCLIBin, "collection-manage",
+				"--cluster", clusterEndpoint,
+				"--username", defaultUsername,
+				"--password", defaultPassword,
+				"--bucket", "orders",
+				"--list-collections", "sales",
+			},
+			AttachStdout: true,
+			AttachStderr: true,
+		})
+		require.NoError(t, err, "Failed to list collections: %s", output)
+		assert.Contains(t, output, "invoices")
+		assert.Contains(t, output, "refunds")
 	})
 
 	t.Run("GetLogs", func(t *testing.T) {

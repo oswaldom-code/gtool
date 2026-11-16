@@ -2,9 +2,9 @@ package stress
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -17,7 +17,7 @@ import (
 
 const (
 	requestTimeout  = 30 * time.Second
-	maxIdlePerHost  = 10000
+	maxIdlePerHost  = config.MaxStressWorkers
 	maxErrorSamples = 5
 )
 
@@ -25,7 +25,10 @@ const (
 // response: timeouts, refused connections) and 5xx count towards ErrorRate;
 // 4xx are tracked apart so badly resolved targets do not fake a breaking point.
 type StageMetrics struct {
-	RequestedRPS    int
+	// RequestedRPS is the stage rate; 0 in a concurrency stage.
+	RequestedRPS int
+	// Workers is the closed-loop concurrency; 0 in a rate stage.
+	Workers         int
 	Duration        time.Duration
 	Requests        uint64
 	AchievedRPS     float64
@@ -44,20 +47,50 @@ type StageMetrics struct {
 	Errors          []string
 }
 
-// Stages expands a ramp into the requested RPS of each stage. The last stage
-// is always max-rps, even when the step does not land on it.
-func Stages(r config.StressRamp) []int {
-	var stages []int
-	for rps := r.StartRPS; rps <= r.MaxRPS; rps += r.StepRPS {
-		stages = append(stages, rps)
-		if r.StepRPS <= 0 {
+// Load is the load of one stage: a constant request rate (RPS) or a fixed
+// number of closed-loop workers (Workers). Exactly one is set.
+type Load struct {
+	RPS     int
+	Workers int
+}
+
+func (l Load) String() string {
+	if l.Workers > 0 {
+		return fmt.Sprintf("%d workers", l.Workers)
+	}
+	return fmt.Sprintf("%d rps", l.RPS)
+}
+
+// steps expands start, start+step, ... up to limit. The last value is always
+// limit, even when the step does not land on it.
+func steps(start, step, limit int) []int {
+	var values []int
+	for v := start; v <= limit; v += step {
+		values = append(values, v)
+		if step <= 0 {
 			break
 		}
 	}
-	if len(stages) > 0 && stages[len(stages)-1] < r.MaxRPS {
-		stages = append(stages, r.MaxRPS)
+	if len(values) > 0 && values[len(values)-1] < limit {
+		values = append(values, limit)
 	}
-	return stages
+	return values
+}
+
+// Stages expands the configured ramp into the load of each stage.
+func Stages(sc *config.StressConfig) []Load {
+	var loads []Load
+	if sc.Concurrent() {
+		r := sc.ConcurrencyRamp
+		for _, workers := range steps(r.StartWorkers, r.StepWorkers, r.MaxWorkers) {
+			loads = append(loads, Load{Workers: workers})
+		}
+		return loads
+	}
+	for _, rps := range steps(sc.Ramp.StartRPS, sc.Ramp.StepRPS, sc.Ramp.MaxRPS) {
+		loads = append(loads, Load{RPS: rps})
+	}
+	return loads
 }
 
 // weightedSchedule repeats each target index by its weight, so a round-robin
@@ -106,8 +139,9 @@ func (s *StageMetrics) classify(res *vegeta.Result) {
 
 // buildStageMetrics derives the stage view from vegeta's aggregated metrics
 // and the gtool error classification.
-func buildStageMetrics(rps int, m *vegeta.Metrics, counts StageMetrics) StageMetrics {
-	counts.RequestedRPS = rps
+func buildStageMetrics(load Load, m *vegeta.Metrics, counts StageMetrics) StageMetrics {
+	counts.RequestedRPS = load.RPS
+	counts.Workers = load.Workers
 	counts.Requests = m.Requests
 	counts.Duration = m.Duration + m.Wait
 	counts.AchievedRPS = m.Rate
@@ -157,13 +191,22 @@ func NewEngine(logger *zap.Logger) *Engine {
 	}
 }
 
-// RunStage attacks at a constant rate for the given duration. A cancelled
+// RunStage attacks with the given load for the given duration. A cancelled
 // context stops the attack; the metrics collected so far are returned with
 // the context error.
-func (e *Engine) RunStage(ctx context.Context, tr vegeta.Targeter, rps int, d time.Duration) (StageMetrics, error) {
+func (e *Engine) RunStage(ctx context.Context, tr vegeta.Targeter, load Load, d time.Duration) (StageMetrics, error) {
+	opts := []func(*vegeta.Attacker){vegeta.Client(e.client)}
+	pacer := vegeta.Rate{Freq: load.RPS, Per: time.Second}
+	if load.Workers > 0 {
+		// A zero rate is unbounded, so a fixed worker pool makes the attack
+		// closed-loop: each worker sends again as soon as it gets a response.
+		workers := uint64(load.Workers)
+		opts = append(opts, vegeta.Workers(workers), vegeta.MaxWorkers(workers))
+		pacer = vegeta.Rate{}
+	}
 	// A vegeta attacker stops itself when an attack ends, so each stage needs
 	// a fresh one; the shared client keeps the connections.
-	attacker := vegeta.NewAttacker(vegeta.Client(e.client))
+	attacker := vegeta.NewAttacker(opts...)
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -176,37 +219,36 @@ func (e *Engine) RunStage(ctx context.Context, tr vegeta.Targeter, rps int, d ti
 
 	var m vegeta.Metrics
 	var counts StageMetrics
-	pacer := vegeta.Rate{Freq: rps, Per: time.Second}
-	for res := range attacker.Attack(tr, pacer, d, "stage-"+strconv.Itoa(rps)) {
+	for res := range attacker.Attack(tr, pacer, d, "stage-"+load.String()) {
 		m.Add(res)
 		counts.classify(res)
 	}
 	m.Close()
 
-	return buildStageMetrics(rps, &m, counts), ctx.Err()
+	return buildStageMetrics(load, &m, counts), ctx.Err()
 }
 
 // Ramp runs the stages in order and stops early once shouldStop reports the
 // breaking point. It returns the stages that completed.
-func (e *Engine) Ramp(ctx context.Context, baseURL string, targets []Target, stages []int,
+func (e *Engine) Ramp(ctx context.Context, baseURL string, targets []Target, stages []Load,
 	stageDuration time.Duration, shouldStop func(StageMetrics) bool) ([]StageMetrics, error) {
 	tr := newTargeter(baseURL, targets)
 	results := make([]StageMetrics, 0, len(stages))
-	for _, rps := range stages {
-		e.logger.Info("stress stage started", zap.Int("rps", rps), zap.Duration("duration", stageDuration))
-		stage, err := e.RunStage(ctx, tr, rps, stageDuration)
+	for _, load := range stages {
+		e.logger.Info("stress stage started", zap.Stringer("load", load), zap.Duration("duration", stageDuration))
+		stage, err := e.RunStage(ctx, tr, load, stageDuration)
 		if err != nil {
 			return results, err
 		}
 		results = append(results, stage)
 		e.logger.Info("stress stage finished",
-			zap.Int("rps", rps),
+			zap.Stringer("load", load),
 			zap.Float64("achieved-rps", stage.AchievedRPS),
 			zap.Duration("p95", stage.P95),
 			zap.Float64("error-rate", stage.ErrorRate),
 		)
 		if shouldStop != nil && shouldStop(stage) {
-			e.logger.Info("breaking point reached, stopping ramp", zap.Int("rps", rps))
+			e.logger.Info("breaking point reached, stopping ramp", zap.Stringer("load", load))
 			break
 		}
 	}

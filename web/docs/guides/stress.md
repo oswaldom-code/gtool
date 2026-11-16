@@ -22,6 +22,9 @@ CI on the answer.
 - **Max sustained RPS** — the highest requested RPS completed before the breaking
   point. The command fails when it is below `min-acceptable-rps`.
 
+The load ramps by request rate (`ramp`) or by concurrent workers
+([`concurrency-ramp`](#concurrency-ramp)).
+
 !!! info "Host-relative measurements"
     The load generator, the app and the mocks share the host. Use the numbers to
     compare commits; point `--target-url` at a dedicated environment for serious
@@ -81,6 +84,35 @@ stress-config:
   reports-path: test/stress/reports   # default
 ```
 
+## Concurrency ramp
+
+`ramp` sends requests at a fixed rate whether or not the responses arrived: against
+a fast service only a handful of requests are in flight at any time, so connection
+pools and locks are never contended. `concurrency-ramp` keeps a fixed number of
+workers instead, each sending its next request as soon as the previous one returns.
+It replaces `ramp`; the two are mutually exclusive.
+
+```yaml
+stress-config:
+  targets:
+    - { name: search, method: GET, path: /customers?code=42 }
+  concurrency-ramp:
+    start-workers: 20
+    step-workers: 50
+    step-duration: 10s
+    max-workers: 500                      # the last stage is always max-workers
+  thresholds:
+    throughput-plateau-tolerance: 0.05    # default 0.05
+```
+
+- **Throughput plateau** — the first stage whose throughput is not more than
+  `throughput-plateau-tolerance` above the previous stage: more workers no longer
+  buy more requests per second. It is reported and does not stop the ramp.
+- **Max sustained RPS** is the highest throughput reached before the breaking point,
+  and `min-acceptable-rps` is checked against it.
+- Degradation only looks at p95: there is no requested rate to compare the
+  throughput with.
+
 `stress-config` is validated on its own: `gtool stress` does not need the
 component-test settings such as `test-launcher`. Validation lists every problem
 in the block:
@@ -91,6 +123,9 @@ in the block:
   `start-rps`.
 - `thresholds.degradation-latency-factor` must be greater than 1,
   `degradation-p95-ms` not negative and `break-error-rate` between 0 and 1.
+- `concurrency-ramp` follows the same rules with `start-workers`, `step-workers`
+  and `max-workers` (at most 10000), and cannot be combined with `ramp`.
+  `thresholds.throughput-plateau-tolerance` must be between 0 and 1.
 - `min-acceptable-rps` must not be negative nor exceed `ramp.max-rps`.
 - Targets need a supported method and a path starting with `/`; `body` and
   `body-file` are mutually exclusive, a `body-file` must exist and weights must
@@ -124,7 +159,9 @@ Both files land in `reports-path`:
   build and the host that produced it, ramp, effective thresholds, targets,
   per-stage metrics (achieved RPS, throughput, latency mean/p50/p95/p99/max, error
   and 4xx rates, status codes), the two points (`null` when not reached),
-  `max-sustained-rps`, `passed` and `warnings`.
+  `max-sustained-rps`, `passed` and `warnings`. `load-model` is `rate` or
+  `concurrency`; a concurrency run adds `concurrency-ramp`, `workers` per stage and
+  point, and `throughput-plateau`.
 - **`stress-report.html`** — a self-contained page: latency and error-rate charts by
   requested RPS with both points marked, stage and target tables, and the run
   details.

@@ -75,7 +75,7 @@ make install            # copies the binary to $(go env GOPATH)/bin
 make test-launcher-image  # builds the Karate launcher image
 ```
 
-`go install` does not inject build metadata, so `gtool version --full` reports commit `dev`; build with `make build` when you need it (it is also recorded in the stress reports).
+`go install` does not inject build metadata, so `gtool version --full` reports commit and build date as `unknown` and the stress reports omit them; build with `make build` when you need them.
 
 > ⚠️ **`make install` copies to `$GOPATH/bin` (`~/go/bin`).** If your terminal can't find `gtool` after installing, that directory is not on your `PATH`. Add it:
 > ```bash
@@ -237,6 +237,8 @@ stress-config:
       createOrder: { body-file: test/stress/order.json, weight: 3 }
   targets: []                       # explicit targets, override spec operations
   ramp: { start-rps: 10, step-rps: 10, step-duration: 20s, max-rps: 500 }
+  # or ramp by concurrent workers instead of request rate:
+  # concurrency-ramp: { start-workers: 20, step-workers: 50, step-duration: 10s, max-workers: 500 }
   thresholds: { degradation-latency-factor: 2.0, degradation-p95-ms: 800, break-error-rate: 0.05 }
   min-acceptable-rps: 100
   reports-path: test/stress/reports

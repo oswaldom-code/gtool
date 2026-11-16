@@ -76,7 +76,7 @@ func init() {
 	rootCmd.AddCommand(stress.NewStressCmd(&cfgFile, coreStress.ToolInfo{
 		Name:       "gtool",
 		Version:    Version,
-		Commit:     GitCommit,
+		Commit:     buildCommit(),
 		BuildDate:  BuildDate,
 		Repository: RepositoryURL,
 	}))

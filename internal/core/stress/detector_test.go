@@ -104,6 +104,56 @@ var _ = Describe("Detect", func() {
 	})
 })
 
+// concurrent builds a concurrency stage with the given throughput and p95.
+func concurrent(workers int, throughput float64, p95Ms int) stress.StageMetrics {
+	return stress.StageMetrics{
+		Workers:    workers,
+		Throughput: throughput,
+		P95:        time.Duration(p95Ms) * time.Millisecond,
+	}
+}
+
+var _ = Describe("Detect on a concurrency ramp", func() {
+	It("marks the plateau where more workers stop raising the throughput", func() {
+		stages := []stress.StageMetrics{
+			concurrent(20, 1000, 10), concurrent(70, 3000, 12), concurrent(120, 3100, 15), concurrent(170, 3050, 18),
+		}
+		a := stress.Detect(stages, config.StressThresholds{})
+
+		Expect(a.Plateau).NotTo(BeNil())
+		Expect(a.Plateau.Workers).To(Equal(120))
+		Expect(a.Plateau.RPS).To(BeZero())
+		Expect(a.Plateau.Stage).To(Equal(2))
+		Expect(a.Plateau.Reason).To(Equal("throughput 3100.0 rps is not more than 5% above 3000.0 rps at 70 workers"))
+		Expect(a.Degradation).To(BeNil(), "an unknown requested rate never degrades the throughput rule")
+		Expect(a.Breaking).To(BeNil())
+		Expect(a.MaxSustainedRPS).To(Equal(3100), "the best throughput, not the last stage")
+	})
+
+	It("honours a custom plateau tolerance", func() {
+		stages := []stress.StageMetrics{concurrent(10, 1000, 10), concurrent(20, 1150, 10)}
+		Expect(stress.Detect(stages, config.StressThresholds{}).Plateau).To(BeNil())
+		Expect(stress.Detect(stages, config.StressThresholds{ThroughputPlateauTolerance: 0.2}).Plateau).NotTo(BeNil())
+	})
+
+	It("reports degradation and breaking by workers", func() {
+		stages := []stress.StageMetrics{
+			concurrent(10, 1000, 10), concurrent(20, 1900, 30), withErrors(concurrent(30, 500, 90), 0.5),
+		}
+		a := stress.Detect(stages, config.StressThresholds{})
+
+		Expect(a.Degradation.Workers).To(Equal(20))
+		Expect(a.Breaking.Workers).To(Equal(30))
+		Expect(a.Plateau).To(BeNil(), "the breaking stage is not a plateau")
+		Expect(a.MaxSustainedRPS).To(Equal(1900))
+	})
+
+	It("never marks a plateau on a rate ramp", func() {
+		stages := []stress.StageMetrics{healthy(10, 10), withThroughput(healthy(20, 10), 10)}
+		Expect(stress.Detect(stages, config.StressThresholds{}).Plateau).To(BeNil())
+	})
+})
+
 var _ = Describe("BreakingReason", func() {
 	It("is empty below the threshold", func() {
 		Expect(stress.BreakingReason(withErrors(healthy(10, 10), 0.01), config.StressThresholds{})).To(BeEmpty())
@@ -125,8 +175,9 @@ var _ = Describe("Analysis.MeetsMinimum", func() {
 var _ = Describe("WithDefaults", func() {
 	It("fills only zero values", func() {
 		Expect(stress.WithDefaults(config.StressThresholds{})).To(Equal(config.StressThresholds{
-			DegradationLatencyFactor: 2.0, BreakErrorRate: 0.05}))
-		custom := config.StressThresholds{DegradationLatencyFactor: 3, DegradationP95Ms: 500, BreakErrorRate: 0.1}
+			DegradationLatencyFactor: 2.0, BreakErrorRate: 0.05, ThroughputPlateauTolerance: 0.05}))
+		custom := config.StressThresholds{
+			DegradationLatencyFactor: 3, DegradationP95Ms: 500, BreakErrorRate: 0.1, ThroughputPlateauTolerance: 0.2}
 		Expect(stress.WithDefaults(custom)).To(Equal(custom))
 	})
 })

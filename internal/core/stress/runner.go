@@ -95,7 +95,7 @@ func (r *Runner) Run(ctx context.Context, cfg *config.Config) (*plugin.TestResul
 	}
 
 	r.logger.Info("starting stress ramp", zap.String("url", baseURL), zap.Int("targets", len(plan.Targets)))
-	stages, err := r.engine.Ramp(ctx, baseURL, plan.Targets, Stages(sc.Ramp), sc.Ramp.StepDuration,
+	stages, err := r.engine.Ramp(ctx, baseURL, plan.Targets, Stages(sc), sc.StepDuration(),
 		func(s StageMetrics) bool { return BreakingReason(s, sc.Thresholds) != "" })
 	if err != nil {
 		return nil, gtErrors.Wrap(err, gtErrors.ErrTestFailed, "stress ramp interrupted")

@@ -29,7 +29,8 @@ make install             # copies the binary to $(go env GOPATH)/bin
 ```
 
 `make build` stamps the version, git commit and build date into the binary. A plain
-`go install` does not, so `gtool version --full` reports commit `dev`.
+`go install` does not, so `gtool version --full` reports them as `unknown` and the
+stress reports omit them.
 
 ## Karate launcher image
 

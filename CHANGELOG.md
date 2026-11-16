@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.1.0
+
+### Added
+
+- `gtool stress`: `concurrency-ramp` ramps the load by closed-loop workers
+  instead of request rate, and the reports mark the throughput plateau
+  (`thresholds.throughput-plateau-tolerance`). The JSON report gains
+  `load-model`, `concurrency-ramp`, `workers` and `throughput-plateau`.
+
+### Fixed
+
+- Couchbase: `scope` and `collections` in `mock-config` are accepted again and
+  are now created in the bucket (collections without a `scope` go to
+  `_default`; entry keys other than `name` are ignored).
+- Stress reports no longer print placeholder commit and build date when the
+  binary carries no build metadata (e.g. `go install`); a build made inside
+  the repository falls back to the VCS revision.
+
 ## v1.0.0
 
 First stable release. Documentation: https://oswaldom-code.github.io/gtool/

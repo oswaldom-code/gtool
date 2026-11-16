@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -162,6 +163,23 @@ var _ = Describe("stress command", func() {
 			Expect(text).To(ContainSubstring("Warning: mutating methods enabled (extra)"))
 			Expect(runner.ran).To(BeFalse())
 			Expect(usedPipe).To(BeFalse())
+		})
+
+		It("prints a concurrency ramp in workers", func() {
+			concurrency := strings.Replace(stressConfigYAML, `  ramp:
+    start-rps: 10
+    step-rps: 10
+    step-duration: 1s
+    max-rps: 30
+`, `  concurrency-ramp:
+    start-workers: 20
+    step-workers: 50
+    step-duration: 2s
+    max-workers: 120
+`, 1)
+			Expect(os.WriteFile(cfgPath, []byte(concurrency), 0o644)).To(Succeed())
+			Expect(runCmd("plan")).To(Succeed())
+			Expect(out.String()).To(ContainSubstring("Ramp: 20 → 120 workers, +50 every 2s (3 stages, up to 6s)"))
 		})
 
 		It("fails on a config without stress-config", func() {

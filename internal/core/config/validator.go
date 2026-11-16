@@ -312,6 +312,26 @@ func validateStressRamp(r config.StressRamp) []string {
 	return errs
 }
 
+func validateStressConcurrencyRamp(r config.StressConcurrencyRamp) []string {
+	var errs []string
+	if r.StartWorkers <= 0 {
+		errs = append(errs, "stress-config.concurrency-ramp.start-workers must be positive")
+	}
+	if r.MaxWorkers < r.StartWorkers {
+		errs = append(errs, "stress-config.concurrency-ramp.max-workers must be greater than or equal to start-workers")
+	}
+	if r.MaxWorkers > config.MaxStressWorkers {
+		errs = append(errs, fmt.Sprintf("stress-config.concurrency-ramp.max-workers must not exceed %d", config.MaxStressWorkers))
+	}
+	if r.StepWorkers < 0 || (r.StepWorkers == 0 && r.MaxWorkers > r.StartWorkers) {
+		errs = append(errs, "stress-config.concurrency-ramp.step-workers must be positive when max-workers is greater than start-workers")
+	}
+	if r.StepDuration <= 0 {
+		errs = append(errs, "stress-config.concurrency-ramp.step-duration must be positive")
+	}
+	return errs
+}
+
 func validateStressThresholds(t config.StressThresholds) []string {
 	var errs []string
 	if t.DegradationLatencyFactor != 0 && t.DegradationLatencyFactor <= 1 {
@@ -323,6 +343,9 @@ func validateStressThresholds(t config.StressThresholds) []string {
 	if t.BreakErrorRate < 0 || t.BreakErrorRate > 1 {
 		errs = append(errs, "stress-config.thresholds.break-error-rate must be between 0 and 1")
 	}
+	if t.ThroughputPlateauTolerance < 0 || t.ThroughputPlateauTolerance >= 1 {
+		errs = append(errs, "stress-config.thresholds.throughput-plateau-tolerance must be between 0 and 1")
+	}
 	return errs
 }
 
@@ -333,12 +356,19 @@ func (v *Validator) stressErrors(sc *config.StressConfig) []string {
 	}
 	errs = append(errs, v.validateStressSource(sc.Source)...)
 	errs = append(errs, v.validateStressTargets(sc.Targets)...)
-	errs = append(errs, validateStressRamp(sc.Ramp)...)
+	switch {
+	case sc.Concurrent() && sc.Ramp != (config.StressRamp{}):
+		errs = append(errs, "stress-config.ramp and stress-config.concurrency-ramp are mutually exclusive")
+	case sc.Concurrent():
+		errs = append(errs, validateStressConcurrencyRamp(sc.ConcurrencyRamp)...)
+	default:
+		errs = append(errs, validateStressRamp(sc.Ramp)...)
+	}
 	errs = append(errs, validateStressThresholds(sc.Thresholds)...)
 	if sc.MinAcceptableRPS < 0 {
 		errs = append(errs, "stress-config.min-acceptable-rps must not be negative")
 	}
-	if sc.MinAcceptableRPS > sc.Ramp.MaxRPS {
+	if !sc.Concurrent() && sc.MinAcceptableRPS > sc.Ramp.MaxRPS {
 		errs = append(errs, "stress-config.min-acceptable-rps must not exceed ramp.max-rps")
 	}
 	return errs

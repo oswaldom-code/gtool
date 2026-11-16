@@ -31,7 +31,7 @@ make install             # copies the binary to $(go env GOPATH)/bin
 
 `make build` incrusta en el binario la versión, el commit de git y la fecha de
 compilación. Un `go install` simple no lo hace, así que `gtool version --full`
-muestra el commit `dev`.
+los muestra como `unknown` y los reportes de estrés los omiten.
 
 ## Imagen del launcher de Karate
 

@@ -75,7 +75,7 @@ make install            # copies the binary to $(go env GOPATH)/bin
 make test-launcher-image  # builds the Karate launcher image
 ```
 
-`go install` does not inject build metadata, so `gtool version --full` reports commit `dev`; build with `make build` when you need it (it is also recorded in the stress reports).
+`go install` does not inject build metadata, so `gtool version --full` reports commit and build date as `unknown` and the stress reports omit them; build with `make build` when you need them.
 
 > ⚠️ **`make install` copies to `$GOPATH/bin` (`~/go/bin`).** If your terminal can't find `gtool` after installing, that directory is not on your `PATH`. Add it:
 > ```bash

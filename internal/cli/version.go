@@ -10,7 +10,7 @@ import (
 // GitCommit and BuildDate are injected at link time by `make build`; they stay
 // empty in other builds (e.g. go install).
 var (
-	Version   = "1.0.0"
+	Version   = "1.1.0"
 	GitCommit = ""
 	BuildDate = ""
 )

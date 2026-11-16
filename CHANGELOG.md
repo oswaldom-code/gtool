@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- `gtool stress`: `concurrency-ramp` ramps the load by closed-loop workers
+  instead of request rate, and the reports mark the throughput plateau
+  (`thresholds.throughput-plateau-tolerance`). The JSON report gains
+  `load-model`, `concurrency-ramp`, `workers` and `throughput-plateau`.
+
 ### Fixed
 
 - Couchbase: `scope` and `collections` in `mock-config` are accepted again and

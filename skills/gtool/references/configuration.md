@@ -137,6 +137,12 @@ stress-config:
   reports-path: ./test/stress/reports
 ```
 
+Replace `ramp` with `concurrency-ramp: { start-workers: 20, step-workers: 50, step-duration: 10s, max-workers: 500 }`
+to ramp by closed-loop workers instead of request rate (finds pool and lock contention
+a fixed rate never reaches); the report then marks the throughput plateau
+(`thresholds.throughput-plateau-tolerance`, default 0.05) and `min-acceptable-rps` is
+checked against the best throughput.
+
 Outputs `stress-report.json` (stable schema for CI gates) and `stress-report.html`.
 Run `gtool stress plan` first to check the resolved targets.
 

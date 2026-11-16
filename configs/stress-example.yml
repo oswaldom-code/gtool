@@ -58,6 +58,13 @@ stress-config:
     step-rps: 50
     step-duration: 10s
     max-rps: 500
+  # Ramp by concurrent workers instead of request rate (replaces ramp): each
+  # worker sends its next request as soon as the previous one returns.
+  # concurrency-ramp:
+  #   start-workers: 20
+  #   step-workers: 50
+  #   step-duration: 10s
+  #   max-workers: 500
   thresholds:
     degradation-latency-factor: 2.0   # p95 over 2x the baseline stage
     degradation-p95-ms: 200           # or over this absolute SLO

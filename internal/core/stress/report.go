@@ -21,6 +21,10 @@ const (
 	// ReportSchemaVersion is bumped on any breaking change to the JSON report.
 	ReportSchemaVersion = 1
 
+	// Load models of a run, reported as load-model.
+	LoadModelRate        = "rate"
+	LoadModelConcurrency = "concurrency"
+
 	jsonReportFile = "stress-report.json"
 	htmlReportFile = "stress-report.html"
 
@@ -73,24 +77,27 @@ func currentEnvironment() EnvironmentInfo {
 
 // Report is the stable, serialized outcome of a stress run.
 type Report struct {
-	SchemaVersion    int              `json:"schema-version"`
-	Generator        ToolInfo         `json:"generator"`
-	Environment      EnvironmentInfo  `json:"environment"`
-	Mode             string           `json:"mode"`
-	StartedAt        time.Time        `json:"started-at"`
-	GeneratedAt      time.Time        `json:"generated-at"`
-	DurationMs       float64          `json:"duration-ms"`
-	TargetURL        string           `json:"target-url"`
-	Ramp             RampReport       `json:"ramp"`
-	Thresholds       ThresholdsReport `json:"thresholds"`
-	MinAcceptableRPS int              `json:"min-acceptable-rps"`
-	Targets          []TargetReport   `json:"targets"`
-	Stages           []StageReport    `json:"stages"`
-	Degradation      *PointReport     `json:"degradation-point"`
-	Breaking         *PointReport     `json:"breaking-point"`
-	MaxSustainedRPS  int              `json:"max-sustained-rps"`
-	Passed           bool             `json:"passed"`
-	Warnings         []string         `json:"warnings"`
+	SchemaVersion    int                    `json:"schema-version"`
+	Generator        ToolInfo               `json:"generator"`
+	Environment      EnvironmentInfo        `json:"environment"`
+	Mode             string                 `json:"mode"`
+	StartedAt        time.Time              `json:"started-at"`
+	GeneratedAt      time.Time              `json:"generated-at"`
+	DurationMs       float64                `json:"duration-ms"`
+	TargetURL        string                 `json:"target-url"`
+	LoadModel        string                 `json:"load-model"`
+	Ramp             RampReport             `json:"ramp"`
+	ConcurrencyRamp  *ConcurrencyRampReport `json:"concurrency-ramp,omitempty"`
+	Thresholds       ThresholdsReport       `json:"thresholds"`
+	MinAcceptableRPS int                    `json:"min-acceptable-rps"`
+	Targets          []TargetReport         `json:"targets"`
+	Stages           []StageReport          `json:"stages"`
+	Degradation      *PointReport           `json:"degradation-point"`
+	Breaking         *PointReport           `json:"breaking-point"`
+	Plateau          *PointReport           `json:"throughput-plateau"`
+	MaxSustainedRPS  int                    `json:"max-sustained-rps"`
+	Passed           bool                   `json:"passed"`
+	Warnings         []string               `json:"warnings"`
 }
 
 // RampReport mirrors the configured ramp.
@@ -101,11 +108,21 @@ type RampReport struct {
 	MaxRPS       int    `json:"max-rps"`
 }
 
+// ConcurrencyRampReport mirrors the configured concurrency ramp.
+type ConcurrencyRampReport struct {
+	StartWorkers int    `json:"start-workers"`
+	StepWorkers  int    `json:"step-workers"`
+	StepDuration string `json:"step-duration"`
+	MaxWorkers   int    `json:"max-workers"`
+}
+
 // ThresholdsReport holds the effective thresholds (defaults applied).
+// ThroughputPlateauTolerance is only reported for a concurrency ramp.
 type ThresholdsReport struct {
-	DegradationLatencyFactor float64 `json:"degradation-latency-factor"`
-	DegradationP95Ms         int     `json:"degradation-p95-ms"`
-	BreakErrorRate           float64 `json:"break-error-rate"`
+	DegradationLatencyFactor   float64 `json:"degradation-latency-factor"`
+	DegradationP95Ms           int     `json:"degradation-p95-ms"`
+	BreakErrorRate             float64 `json:"break-error-rate"`
+	ThroughputPlateauTolerance float64 `json:"throughput-plateau-tolerance,omitempty"`
 }
 
 // TargetReport describes one target of the run.
@@ -129,6 +146,7 @@ type LatencyReport struct {
 // StageReport is the serialized form of StageMetrics.
 type StageReport struct {
 	RequestedRPS    int            `json:"requested-rps"`
+	Workers         int            `json:"workers"`
 	DurationMs      float64        `json:"duration-ms"`
 	Requests        uint64         `json:"requests"`
 	AchievedRPS     float64        `json:"achieved-rps"`
@@ -143,18 +161,41 @@ type StageReport struct {
 	Errors          []string       `json:"errors"`
 }
 
-// PointReport is a degradation or breaking point.
+// Load is the stage load on the ramp axis: workers in a concurrency stage,
+// requested RPS otherwise.
+func (s StageReport) Load() int {
+	if s.Workers > 0 {
+		return s.Workers
+	}
+	return s.RequestedRPS
+}
+
+// PointReport is a degradation, breaking or plateau point.
 type PointReport struct {
-	RPS    int    `json:"rps"`
-	Stage  int    `json:"stage"`
-	Reason string `json:"reason"`
+	RPS     int    `json:"rps"`
+	Workers int    `json:"workers"`
+	Stage   int    `json:"stage"`
+	Reason  string `json:"reason"`
+}
+
+// Load is the point position on the ramp axis; see StageReport.Load.
+func (p PointReport) Load() int {
+	if p.Workers > 0 {
+		return p.Workers
+	}
+	return p.RPS
+}
+
+// LoadText renders the point load with its unit.
+func (p PointReport) LoadText() string {
+	return Load{RPS: p.RPS, Workers: p.Workers}.String()
 }
 
 func pointReport(p *Point) *PointReport {
 	if p == nil {
 		return nil
 	}
-	return &PointReport{RPS: p.RPS, Stage: p.Stage, Reason: p.Reason}
+	return &PointReport{RPS: p.RPS, Workers: p.Workers, Stage: p.Stage, Reason: p.Reason}
 }
 
 func stageReport(s StageMetrics) StageReport {
@@ -168,6 +209,7 @@ func stageReport(s StageMetrics) StageReport {
 	}
 	return StageReport{
 		RequestedRPS:  s.RequestedRPS,
+		Workers:       s.Workers,
 		DurationMs:    ms(s.Duration),
 		Requests:      s.Requests,
 		AchievedRPS:   s.AchievedRPS,
@@ -198,6 +240,7 @@ func NewReport(run RunInfo, sc *config.StressConfig, plan *Plan, stages []StageM
 		GeneratedAt:   now,
 		DurationMs:    ms(now.Sub(run.StartedAt)),
 		TargetURL:     run.TargetURL,
+		LoadModel:     LoadModelRate,
 		Ramp: RampReport{
 			StartRPS:     sc.Ramp.StartRPS,
 			StepRPS:      sc.Ramp.StepRPS,
@@ -214,9 +257,20 @@ func NewReport(run RunInfo, sc *config.StressConfig, plan *Plan, stages []StageM
 		Stages:           make([]StageReport, 0, len(stages)),
 		Degradation:      pointReport(a.Degradation),
 		Breaking:         pointReport(a.Breaking),
+		Plateau:          pointReport(a.Plateau),
 		MaxSustainedRPS:  a.MaxSustainedRPS,
 		Passed:           a.MeetsMinimum(sc.MinAcceptableRPS),
 		Warnings:         append(append([]string{}, plan.Warnings...), a.Warnings...),
+	}
+	if sc.Concurrent() {
+		r.LoadModel = LoadModelConcurrency
+		r.ConcurrencyRamp = &ConcurrencyRampReport{
+			StartWorkers: sc.ConcurrencyRamp.StartWorkers,
+			StepWorkers:  sc.ConcurrencyRamp.StepWorkers,
+			StepDuration: sc.ConcurrencyRamp.StepDuration.String(),
+			MaxWorkers:   sc.ConcurrencyRamp.MaxWorkers,
+		}
+		r.Thresholds.ThroughputPlateauTolerance = th.ThroughputPlateauTolerance
 	}
 	for _, t := range plan.Targets {
 		r.Targets = append(r.Targets, TargetReport{Name: t.Name, Method: t.Method, Path: t.Path, Weight: t.Weight, Source: t.Source})
@@ -247,6 +301,8 @@ func (r *Report) WriteHTML(w io.Writer) error {
 		Report:        r,
 		LatencyChart:  latencyChart(r),
 		ErrorChart:    errorChart(r),
+		RampText:      r.rampText(),
+		LoadLabel:     r.loadLabel(),
 		GeneratedText: r.GeneratedAt.Format(time.RFC1123),
 		StartedText:   r.StartedAt.Format(time.RFC1123),
 		DurationText:  time.Duration(r.DurationMs * float64(time.Millisecond)).Round(time.Second).String(),
@@ -257,7 +313,27 @@ func pointText(p *PointReport) string {
 	if p == nil {
 		return "not reached"
 	}
-	return fmt.Sprintf("%d rps — %s", p.RPS, p.Reason)
+	return fmt.Sprintf("%s — %s", p.LoadText(), p.Reason)
+}
+
+// Concurrent reports whether the run ramped by concurrent workers.
+func (r *Report) Concurrent() bool {
+	return r.LoadModel == LoadModelConcurrency
+}
+
+// loadLabel names the ramp axis.
+func (r *Report) loadLabel() string {
+	if r.Concurrent() {
+		return "workers"
+	}
+	return "requested rps"
+}
+
+func (r *Report) rampText() string {
+	if c := r.ConcurrencyRamp; c != nil {
+		return fmt.Sprintf("%d→%d workers (+%d every %s)", c.StartWorkers, c.MaxWorkers, c.StepWorkers, c.StepDuration)
+	}
+	return fmt.Sprintf("%d→%d rps (+%d every %s)", r.Ramp.StartRPS, r.Ramp.MaxRPS, r.Ramp.StepRPS, r.Ramp.StepDuration)
 }
 
 // WriteSummary prints the per-stage table, both points and the gate verdict.
@@ -273,10 +349,14 @@ func (r *Report) WriteSummary(w io.Writer) error {
 	// The tabwriter wraps a strings.Builder: writes cannot fail and Flush
 	// reports any formatting error.
 	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', tabwriter.AlignRight)
-	_, _ = fmt.Fprintln(tw, "RPS\tACHIEVED\tTHROUGHPUT\tP50 ms\tP95 ms\tP99 ms\tERRORS\t4XX\t")
+	loadHeader := "RPS"
+	if r.Concurrent() {
+		loadHeader = "WORKERS"
+	}
+	_, _ = fmt.Fprintln(tw, loadHeader+"\tACHIEVED\tTHROUGHPUT\tP50 ms\tP95 ms\tP99 ms\tERRORS\t4XX\t")
 	for _, s := range r.Stages {
 		_, _ = fmt.Fprintf(tw, "%d\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f\t%.2f%%\t%.2f%%\t\n",
-			s.RequestedRPS, s.AchievedRPS, s.ThroughputRPS, s.LatencyMs.P50, s.LatencyMs.P95, s.LatencyMs.P99,
+			s.Load(), s.AchievedRPS, s.ThroughputRPS, s.LatencyMs.P50, s.LatencyMs.P95, s.LatencyMs.P99,
 			s.ErrorRate*100, s.ClientErrorRate*100)
 	}
 	if err := tw.Flush(); err != nil {
@@ -285,6 +365,9 @@ func (r *Report) WriteSummary(w io.Writer) error {
 
 	fmt.Fprintf(&b, "\nDegradation point: %s\n", pointText(r.Degradation))
 	fmt.Fprintf(&b, "Breaking point:    %s\n", pointText(r.Breaking))
+	if r.Concurrent() {
+		fmt.Fprintf(&b, "Plateau:           %s\n", pointText(r.Plateau))
+	}
 	fmt.Fprintf(&b, "Max sustained:     %d rps", r.MaxSustainedRPS)
 	if r.MinAcceptableRPS > 0 {
 		verdict := "PASS"

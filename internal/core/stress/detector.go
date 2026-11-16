@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	defaultLatencyFactor  = 2.0
-	defaultBreakErrorRate = 0.05
+	defaultLatencyFactor    = 2.0
+	defaultBreakErrorRate   = 0.05
+	defaultPlateauTolerance = 0.05
 	// throughputFloor is the fraction of the requested rate below which the
 	// achieved throughput counts as degraded.
 	throughputFloor = 0.9
@@ -18,11 +19,17 @@ const (
 	baselineClientErrorWarning = 0.1
 )
 
-// Point marks the first stage where a condition was observed.
+// Point marks the first stage where a condition was observed. RPS and Workers
+// are the load of that stage (see StageMetrics).
 type Point struct {
-	RPS    int
-	Stage  int
-	Reason string
+	RPS     int
+	Workers int
+	Stage   int
+	Reason  string
+}
+
+func pointAt(s StageMetrics, stage int, reason string) *Point {
+	return &Point{RPS: s.RequestedRPS, Workers: s.Workers, Stage: stage, Reason: reason}
 }
 
 // Analysis is the outcome of evaluating the stages against the thresholds.
@@ -30,8 +37,12 @@ type Analysis struct {
 	Baseline    *StageMetrics
 	Degradation *Point
 	Breaking    *Point
-	// MaxSustainedRPS is the highest requested RPS completed without
-	// reaching the breaking point (0 when the first stage already broke).
+	// Plateau is the first concurrency stage where adding workers no longer
+	// raised the throughput. It is informative: it does not stop the ramp.
+	Plateau *Point
+	// MaxSustainedRPS is the highest load completed without reaching the
+	// breaking point (0 when the first stage already broke): the requested
+	// RPS of a rate ramp, the throughput of a concurrency ramp.
 	MaxSustainedRPS int
 	Warnings        []string
 }
@@ -43,6 +54,9 @@ func WithDefaults(t config.StressThresholds) config.StressThresholds {
 	}
 	if t.BreakErrorRate == 0 {
 		t.BreakErrorRate = defaultBreakErrorRate
+	}
+	if t.ThroughputPlateauTolerance == 0 {
+		t.ThroughputPlateauTolerance = defaultPlateauTolerance
 	}
 	return t
 }
@@ -77,6 +91,24 @@ func degradationReason(s, baseline StageMetrics, t config.StressThresholds) stri
 	return ""
 }
 
+// plateauReason reports why a concurrency stage did not raise the throughput
+// of the previous one, or "" when it did.
+func plateauReason(s, prev StageMetrics, t config.StressThresholds) string {
+	if s.Workers == 0 || s.Throughput > prev.Throughput*(1+t.ThroughputPlateauTolerance) {
+		return ""
+	}
+	return fmt.Sprintf("throughput %.1f rps is not more than %.0f%% above %.1f rps at %d workers",
+		s.Throughput, t.ThroughputPlateauTolerance*100, prev.Throughput, prev.Workers)
+}
+
+// sustainedRPS is the load a completed stage proves the target can sustain.
+func sustainedRPS(s StageMetrics) int {
+	if s.Workers > 0 {
+		return int(s.Throughput)
+	}
+	return s.RequestedRPS
+}
+
 // Detect finds the degradation and breaking points. The first stage is the
 // baseline. A run that breaks without degrading first reports the breaking
 // stage as the degradation point too.
@@ -96,17 +128,22 @@ func Detect(stages []StageMetrics, t config.StressThresholds) Analysis {
 	for i, s := range stages {
 		if a.Degradation == nil {
 			if reason := degradationReason(s, *a.Baseline, t); reason != "" {
-				a.Degradation = &Point{RPS: s.RequestedRPS, Stage: i, Reason: reason}
+				a.Degradation = pointAt(s, i, reason)
 			}
 		}
 		if reason := BreakingReason(s, t); reason != "" {
-			a.Breaking = &Point{RPS: s.RequestedRPS, Stage: i, Reason: reason}
+			a.Breaking = pointAt(s, i, reason)
 			if a.Degradation == nil {
-				a.Degradation = &Point{RPS: s.RequestedRPS, Stage: i, Reason: "reached together with the breaking point"}
+				a.Degradation = pointAt(s, i, "reached together with the breaking point")
 			}
 			return a
 		}
-		a.MaxSustainedRPS = s.RequestedRPS
+		if a.Plateau == nil && i > 0 {
+			if reason := plateauReason(s, stages[i-1], t); reason != "" {
+				a.Plateau = pointAt(s, i, reason)
+			}
+		}
+		a.MaxSustainedRPS = max(a.MaxSustainedRPS, sustainedRPS(s))
 	}
 	return a
 }

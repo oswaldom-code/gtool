@@ -49,6 +49,7 @@ type chart struct {
 	Width, Height            float64
 	Left, Right, Top, Bottom float64
 	YLabel                   string
+	XLabel                   string
 	Series                   []chartSeries
 	XTicks                   []chartTick
 	YTicks                   []chartTick
@@ -61,6 +62,8 @@ type htmlView struct {
 	*Report
 	LatencyChart  chart
 	ErrorChart    chart
+	RampText      string
+	LoadLabel     string
 	GeneratedText string
 	StartedText   string
 	DurationText  string
@@ -80,12 +83,12 @@ func niceMax(v float64) float64 {
 	return 10 * exp
 }
 
-// newChart sets up the axes for the stage RPS values and the y range.
-func newChart(rps []int, yMax float64, yLabel string) (chart, func(int) float64, func(float64) float64) {
+// newChart sets up the axes for the stage loads and the y range.
+func newChart(rps []int, yMax float64, yLabel, xLabel string) (chart, func(int) float64, func(float64) float64) {
 	c := chart{
 		Width: chartWidth, Height: chartHeight,
 		Left: chartLeft, Right: chartRight, Top: chartTop, Bottom: chartBottom,
-		YLabel: yLabel,
+		YLabel: yLabel, XLabel: xLabel,
 	}
 	minX, maxX := 0, 1
 	if len(rps) > 0 {
@@ -139,27 +142,31 @@ func marker(xPos, labelY float64, label string) chartMarker {
 	return m
 }
 
-// addMarkers draws the degradation and breaking points as vertical lines.
+// addMarkers draws the degradation, breaking and plateau points as vertical
+// lines.
 func addMarkers(c *chart, r *Report, x func(int) float64) {
 	if r.Degradation != nil {
-		c.Markers = append(c.Markers, marker(x(r.Degradation.RPS), chartTop+10, "degradation"))
+		c.Markers = append(c.Markers, marker(x(r.Degradation.Load()), chartTop+10, "degradation"))
 	}
 	if r.Breaking != nil {
-		c.Markers = append(c.Markers, marker(x(r.Breaking.RPS), chartTop+24, "breaking"))
+		c.Markers = append(c.Markers, marker(x(r.Breaking.Load()), chartTop+24, "breaking"))
+	}
+	if r.Plateau != nil {
+		c.Markers = append(c.Markers, marker(x(r.Plateau.Load()), chartTop+38, "plateau"))
 	}
 }
 
-func stageRPS(r *Report) []int {
-	rps := make([]int, len(r.Stages))
+func stageLoads(r *Report) []int {
+	loads := make([]int, len(r.Stages))
 	for i, s := range r.Stages {
-		rps[i] = s.RequestedRPS
+		loads[i] = s.Load()
 	}
-	return rps
+	return loads
 }
 
-// latencyChart plots p50/p95/p99 against the requested RPS.
+// latencyChart plots p50/p95/p99 against the stage load.
 func latencyChart(r *Report) chart {
-	rps := stageRPS(r)
+	rps := stageLoads(r)
 	p50 := make([]float64, len(r.Stages))
 	p95 := make([]float64, len(r.Stages))
 	p99 := make([]float64, len(r.Stages))
@@ -168,7 +175,7 @@ func latencyChart(r *Report) chart {
 		p50[i], p95[i], p99[i] = s.LatencyMs.P50, s.LatencyMs.P95, s.LatencyMs.P99
 		top = math.Max(top, s.LatencyMs.P99)
 	}
-	c, x, y := newChart(rps, niceMax(top*1.1), "latency (ms)")
+	c, x, y := newChart(rps, niceMax(top*1.1), "latency (ms)", r.loadLabel())
 	c.Series = []chartSeries{
 		series("p50", "p50", rps, p50, x, y),
 		series("p95", "p95", rps, p95, x, y),
@@ -182,9 +189,9 @@ func latencyChart(r *Report) chart {
 }
 
 // errorChart plots the error rate and the 4xx rate (percent) against the
-// requested RPS, with the breaking threshold.
+// stage load, with the breaking threshold.
 func errorChart(r *Report) chart {
-	rps := stageRPS(r)
+	rps := stageLoads(r)
 	errs := make([]float64, len(r.Stages))
 	client := make([]float64, len(r.Stages))
 	top := r.Thresholds.BreakErrorRate * 100
@@ -192,7 +199,7 @@ func errorChart(r *Report) chart {
 		errs[i], client[i] = s.ErrorRate*100, s.ClientErrorRate*100
 		top = math.Max(top, math.Max(errs[i], client[i]))
 	}
-	c, x, y := newChart(rps, math.Min(niceMax(top*1.1), 100), "rate (%)")
+	c, x, y := newChart(rps, math.Min(niceMax(top*1.1), 100), "rate (%)", r.loadLabel())
 	c.Series = []chartSeries{
 		series("errors (5xx + network)", "errors", rps, errs, x, y),
 		series("4xx", "client", rps, client, x, y),

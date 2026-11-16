@@ -23,6 +23,9 @@ y usa la respuesta como gate de CI.
 - **RPS máximo sostenido**: el RPS solicitado más alto completado antes del punto de
   ruptura. El comando falla cuando es inferior a `min-acceptable-rps`.
 
+La carga sube por tasa de peticiones (`ramp`) o por workers concurrentes
+([`concurrency-ramp`](#rampa-por-concurrencia)).
+
 !!! info "Mediciones relativas al host"
     El generador de carga, la app y los mocks comparten el host. Usa los números para
     comparar commits; para mediciones serias, apunta `--target-url` a un entorno
@@ -84,6 +87,35 @@ stress-config:
   reports-path: test/stress/reports   # default
 ```
 
+## Rampa por concurrencia
+
+`ramp` envía peticiones a una tasa fija, hayan llegado o no las respuestas: contra un
+servicio rápido solo hay un puñado de peticiones en vuelo a la vez, así que los pools
+de conexiones y los locks nunca entran en contención. `concurrency-ramp` mantiene en
+su lugar un número fijo de workers, y cada uno envía su siguiente petición en cuanto
+recibe la respuesta anterior. Sustituye a `ramp`; son mutuamente excluyentes.
+
+```yaml
+stress-config:
+  targets:
+    - { name: search, method: GET, path: /customers?code=42 }
+  concurrency-ramp:
+    start-workers: 20
+    step-workers: 50
+    step-duration: 10s
+    max-workers: 500                      # the last stage is always max-workers
+  thresholds:
+    throughput-plateau-tolerance: 0.05    # default 0.05
+```
+
+- **Meseta de throughput**: la primera etapa cuyo throughput no supera en más de
+  `throughput-plateau-tolerance` al de la etapa anterior: más workers ya no dan más
+  peticiones por segundo. Se reporta y no detiene la rampa.
+- **RPS máximo sostenido** es el mayor throughput alcanzado antes del punto de
+  ruptura, y `min-acceptable-rps` se compara con él.
+- La degradación solo mira el p95: no hay una tasa solicitada con la que comparar el
+  throughput.
+
 `stress-config` se valida por separado: `gtool stress` no necesita los ajustes de los
 tests de componente, como `test-launcher`. La validación lista todos los problemas
 del bloque:
@@ -94,6 +126,9 @@ del bloque:
   `start-rps`.
 - `thresholds.degradation-latency-factor` debe ser mayor que 1,
   `degradation-p95-ms` no negativo y `break-error-rate` entre 0 y 1.
+- `concurrency-ramp` sigue las mismas reglas con `start-workers`, `step-workers` y
+  `max-workers` (como máximo 10000), y no puede combinarse con `ramp`.
+  `thresholds.throughput-plateau-tolerance` debe estar entre 0 y 1.
 - `min-acceptable-rps` no puede ser negativo ni superar `ramp.max-rps`.
 - Los targets necesitan un método soportado y una ruta que empiece por `/`; `body`
   y `body-file` son excluyentes, un `body-file` debe existir y los pesos no pueden
@@ -127,7 +162,9 @@ Ambos archivos se generan en `reports-path`:
   gtool y el host que lo generó, la rampa, los umbrales efectivos, los targets, las
   métricas por etapa (RPS alcanzado, throughput, latencia media/p50/p95/p99/máx., tasas
   de errores y de 4xx, códigos de estado), los dos puntos (`null` si no se alcanzan),
-  `max-sustained-rps`, `passed` y `warnings`.
+  `max-sustained-rps`, `passed` y `warnings`. `load-model` es `rate` o `concurrency`;
+  una ejecución por concurrencia añade `concurrency-ramp`, `workers` por etapa y por
+  punto, y `throughput-plateau`.
 - **`stress-report.html`**: una página autocontenida: gráficas de latencia y de tasa
   de errores según el RPS solicitado con ambos puntos marcados, tablas de etapas y de
   targets, y los detalles de la ejecución.

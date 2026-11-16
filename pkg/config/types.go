@@ -49,15 +49,35 @@ type ObservabilityConfig struct {
 	LogLevel string `yaml:"log-level" json:"log-level"`
 }
 
+// MaxStressWorkers caps concurrency-ramp.max-workers: the load generator keeps
+// at most this many connections per host.
+const MaxStressWorkers = 10000
+
 // StressConfig drives `gtool stress`: which targets to hit, how to ramp the
-// load and which thresholds define the degradation and breaking points.
+// load and which thresholds define the degradation and breaking points. The
+// load ramps by request rate (ramp) or by concurrent workers
+// (concurrency-ramp); exactly one of them is set.
 type StressConfig struct {
-	Source           StressSource     `yaml:"source" json:"source"`
-	Targets          []StressTarget   `yaml:"targets" json:"targets"`
-	Ramp             StressRamp       `yaml:"ramp" json:"ramp"`
-	Thresholds       StressThresholds `yaml:"thresholds" json:"thresholds"`
-	MinAcceptableRPS int              `yaml:"min-acceptable-rps" json:"min-acceptable-rps"`
-	ReportsPath      string           `yaml:"reports-path" json:"reports-path"`
+	Source           StressSource          `yaml:"source" json:"source"`
+	Targets          []StressTarget        `yaml:"targets" json:"targets"`
+	Ramp             StressRamp            `yaml:"ramp" json:"ramp"`
+	ConcurrencyRamp  StressConcurrencyRamp `yaml:"concurrency-ramp" json:"concurrency-ramp"`
+	Thresholds       StressThresholds      `yaml:"thresholds" json:"thresholds"`
+	MinAcceptableRPS int                   `yaml:"min-acceptable-rps" json:"min-acceptable-rps"`
+	ReportsPath      string                `yaml:"reports-path" json:"reports-path"`
+}
+
+// Concurrent reports whether the load ramps by concurrent workers.
+func (s *StressConfig) Concurrent() bool {
+	return s.ConcurrencyRamp != (StressConcurrencyRamp{})
+}
+
+// StepDuration returns the stage duration of the configured ramp.
+func (s *StressConfig) StepDuration() time.Duration {
+	if s.Concurrent() {
+		return s.ConcurrencyRamp.StepDuration
+	}
+	return s.Ramp.StepDuration
 }
 
 // StressSource resolves targets from an OpenAPI contract (Swagger 2.0 or OpenAPI 3.x).
@@ -101,12 +121,26 @@ type StressRamp struct {
 	MaxRPS       int           `yaml:"max-rps" json:"max-rps"`
 }
 
+// StressConcurrencyRamp is a stepped closed-loop ramp: start-workers, then
+// +step-workers every step-duration until max-workers. Each worker sends its
+// next request as soon as the previous one returns.
+type StressConcurrencyRamp struct {
+	StartWorkers int           `yaml:"start-workers" json:"start-workers"`
+	StepWorkers  int           `yaml:"step-workers" json:"step-workers"`
+	StepDuration time.Duration `yaml:"step-duration" json:"step-duration"`
+	MaxWorkers   int           `yaml:"max-workers" json:"max-workers"`
+}
+
 // StressThresholds define the degradation and breaking points. Zero values
 // fall back to the defaults applied by the stress runner.
 type StressThresholds struct {
 	DegradationLatencyFactor float64 `yaml:"degradation-latency-factor" json:"degradation-latency-factor"`
 	DegradationP95Ms         int     `yaml:"degradation-p95-ms" json:"degradation-p95-ms"`
 	BreakErrorRate           float64 `yaml:"break-error-rate" json:"break-error-rate"`
+	// ThroughputPlateauTolerance applies to concurrency-ramp: a stage whose
+	// throughput does not exceed the previous one by more than this fraction
+	// marks the throughput plateau.
+	ThroughputPlateauTolerance float64 `yaml:"throughput-plateau-tolerance" json:"throughput-plateau-tolerance"`
 }
 
 func DefaultConfig() *Config {

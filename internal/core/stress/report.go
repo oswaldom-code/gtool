@@ -264,8 +264,11 @@ func pointText(p *PointReport) string {
 func (r *Report) WriteSummary(w io.Writer) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Stress test against %s (%d targets)\n", r.TargetURL, len(r.Targets))
-	fmt.Fprintf(&b, "%s %s (commit %s) on %s, %s/%s, %d CPUs\n\n", r.Generator.Name, r.Generator.Version,
-		r.Generator.Commit, r.Environment.Hostname, r.Environment.OS, r.Environment.Arch, r.Environment.CPUs)
+	fmt.Fprintf(&b, "%s %s", r.Generator.Name, r.Generator.Version)
+	if r.Generator.Commit != "" {
+		fmt.Fprintf(&b, " (commit %s)", r.Generator.Commit)
+	}
+	fmt.Fprintf(&b, " on %s, %s/%s, %d CPUs\n\n", r.Environment.Hostname, r.Environment.OS, r.Environment.Arch, r.Environment.CPUs)
 
 	// The tabwriter wraps a strings.Builder: writes cannot fail and Flush
 	// reports any formatting error.

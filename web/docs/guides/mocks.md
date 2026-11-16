@@ -31,7 +31,7 @@ failure fails the launch instead of leaving a half-seeded mock.
 | `redis` | `redis:7-alpine` | 6379 | `password` |
 | `kafka` | `apache/kafka:3.7.0` | 9092, 9094 | single-node KRaft; creates `topics` with `partitions`; `docker-port` (default 9094) is the listener app containers use via `host.docker.internal`; set it to `auto` too for concurrent runs |
 | `pubsub` | `gcr.io/google.com/cloudsdktool/cloud-sdk:emulators` | 8085 | `project-id`, `topics`, `subscriptions` |
-| `couchbase` | `couchbase:community-7.6.2` | 8091, 8093, 11210 | `user` (alias `username`), `password`, `bucket`, `services`, `bucket-ram-mb`, `cluster-ram-mb`; ports via `admin-port` and `data-port` (must stay 11210); query port 8093 is published |
+| `couchbase` | `couchbase:community-7.6.2` | 8091, 8093, 11210 | `user` (alias `username`), `password`, `bucket`, `services`, `bucket-ram-mb`, `cluster-ram-mb`; `scope` and `collections` (list of `name`) are created in the bucket; ports via `admin-port` and `data-port` (must stay 11210); query port 8093 is published |
 | `gcs` | `fsouza/fake-gcs-server:1.49.0` | 4443 | `project-id`, `buckets` |
 | `floci` | `floci/floci:2.3.0` | 4566 | AWS emulator: `region`, S3 `buckets`, SQS `queues` |
 | `mountebank` | `bbyars/mountebank:2.9.1` | 2525 | loads the imposter JSON files in `imposters-path` (single imposters or `{"imposters": [...]}`); imposter ports are published on the same host port, not `auto` |

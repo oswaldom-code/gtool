@@ -221,3 +221,91 @@ func TestParseConfig_DataPortCannotBeRemapped(t *testing.T) {
 	_, err = p.parseConfig(map[string]interface{}{"data-port": 11210, "admin-port": "18091"})
 	assert.NoError(t, err, "the admin port can still move")
 }
+
+func TestParseConfig_ScopeAndCollections(t *testing.T) {
+	p := NewCouchbasePlugin(nil, nil)
+
+	cfg, err := p.parseConfig(map[string]interface{}{
+		"scope": "sales",
+		"collections": []interface{}{
+			map[string]interface{}{"name": "orders", "id-pattern": "%order_id%"},
+			map[string]interface{}{"name": "invoices"},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "sales", cfg.Scope)
+	assert.Equal(t, []string{"orders", "invoices"}, cfg.Collections, "id-pattern is accepted and ignored")
+
+	tests := []struct {
+		name        string
+		collections interface{}
+		errContains string
+	}{
+		{name: "not a list", collections: "orders", errContains: "collections must be a list"},
+		{name: "entry is not a map", collections: []interface{}{"orders"}, errContains: "collections[0] requires a name"},
+		{name: "entry without name", collections: []interface{}{
+			map[string]interface{}{"name": "orders"},
+			map[string]interface{}{"id-pattern": "%id%"},
+		}, errContains: "collections[1] requires a name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := p.parseConfig(map[string]interface{}{"collections": tt.collections})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errContains)
+		})
+	}
+}
+
+func TestCollectionCommands(t *testing.T) {
+	base := []string{
+		couchbaseCLIBin, "collection-manage",
+		"--cluster", clusterEndpoint,
+		"--username", "admin",
+		"--password", "secret",
+		"--bucket", "orders",
+	}
+	command := func(flag, value string) []string {
+		return append(append([]string{}, base...), flag, value)
+	}
+
+	tests := []struct {
+		name        string
+		scope       string
+		collections []string
+		want        [][]string
+	}{
+		{name: "nothing configured"},
+		{name: "scope only", scope: "sales", want: [][]string{command("--create-scope", "sales")}},
+		{
+			name:        "scope is created before its collections",
+			scope:       "sales",
+			collections: []string{"orders", "invoices"},
+			want: [][]string{
+				command("--create-scope", "sales"),
+				command("--create-collection", "sales.orders"),
+				command("--create-collection", "sales.invoices"),
+			},
+		},
+		{
+			name:        "collections without scope use _default",
+			collections: []string{"orders"},
+			want:        [][]string{command("--create-collection", "_default.orders")},
+		},
+		{
+			name:        "explicit _default scope is not created",
+			scope:       "_default",
+			collections: []string{"orders"},
+			want:        [][]string{command("--create-collection", "_default.orders")},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := collectionCommands(&CouchbaseConfig{
+				Username: "admin", Password: "secret", Bucket: "orders",
+				Scope: tt.scope, Collections: tt.collections,
+			})
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

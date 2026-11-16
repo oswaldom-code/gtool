@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `gtool stress`: `concurrency-ramp` ramps the load by closed-loop workers
+  instead of request rate, and the reports mark the throughput plateau
+  (`thresholds.throughput-plateau-tolerance`). The JSON report gains
+  `load-model`, `concurrency-ramp`, `workers` and `throughput-plateau`.
+
 ## v1.0.0
 
 First stable release. Documentation: https://oswaldom-code.github.io/gtool/

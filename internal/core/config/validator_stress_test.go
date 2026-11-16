@@ -143,6 +143,57 @@ var _ = Describe("Validator stress-config", func() {
 			}, "min-acceptable-rps must not exceed ramp.max-rps"),
 		)
 
+		Describe("concurrency-ramp", func() {
+			BeforeEach(func() {
+				cfg.StressConfig.Ramp = pkgConfig.StressRamp{}
+				cfg.StressConfig.ConcurrencyRamp = pkgConfig.StressConcurrencyRamp{
+					StartWorkers: 20, StepWorkers: 50, StepDuration: 10 * time.Second, MaxWorkers: 500,
+				}
+			})
+
+			It("replaces the rate ramp", func() {
+				Expect(cfg.StressConfig.Concurrent()).To(BeTrue())
+				Expect(cfg.StressConfig.StepDuration()).To(Equal(10 * time.Second))
+				Expect(validator.ValidateStress(cfg)).To(Succeed(), "min-acceptable-rps is not bounded by max-rps")
+			})
+
+			DescribeTable("rejects invalid values",
+				func(mutate func(sc *pkgConfig.StressConfig), expected string) {
+					mutate(cfg.StressConfig)
+					err := validator.ValidateStress(cfg)
+					Expect(err).To(HaveOccurred())
+					Expect(gtErrors.Is(err, gtErrors.ErrConfigInvalid)).To(BeTrue())
+					Expect(err.Error()).To(ContainSubstring(expected))
+				},
+				Entry("both ramps", func(sc *pkgConfig.StressConfig) {
+					sc.Ramp = pkgConfig.StressRamp{StartRPS: 10, MaxRPS: 10, StepDuration: time.Second}
+				}, "ramp and stress-config.concurrency-ramp are mutually exclusive"),
+				Entry("zero start-workers", func(sc *pkgConfig.StressConfig) {
+					sc.ConcurrencyRamp.StartWorkers = 0
+				}, "concurrency-ramp.start-workers must be positive"),
+				Entry("max below start", func(sc *pkgConfig.StressConfig) {
+					sc.ConcurrencyRamp.MaxWorkers = 5
+				}, "max-workers must be greater than or equal to start-workers"),
+				Entry("too many workers", func(sc *pkgConfig.StressConfig) {
+					sc.ConcurrencyRamp.MaxWorkers = pkgConfig.MaxStressWorkers + 1
+				}, "max-workers must not exceed 10000"),
+				Entry("missing step-workers", func(sc *pkgConfig.StressConfig) {
+					sc.ConcurrencyRamp.StepWorkers = 0
+				}, "step-workers must be positive"),
+				Entry("missing step-duration", func(sc *pkgConfig.StressConfig) {
+					sc.ConcurrencyRamp.StepDuration = 0
+				}, "concurrency-ramp.step-duration must be positive"),
+				Entry("plateau tolerance out of range", func(sc *pkgConfig.StressConfig) {
+					sc.Thresholds.ThroughputPlateauTolerance = 1
+				}, "throughput-plateau-tolerance must be between 0 and 1"),
+			)
+		})
+
+		It("reads the step duration of a rate ramp", func() {
+			Expect(cfg.StressConfig.Concurrent()).To(BeFalse())
+			Expect(cfg.StressConfig.StepDuration()).To(Equal(20 * time.Second))
+		})
+
 		It("skips path checks when disabled", func() {
 			validator.SetCheckPaths(false)
 			cfg.StressConfig.Source.OpenAPI = "/does/not/exist.yml"
@@ -174,6 +225,28 @@ var _ = Describe("Validator stress-config", func() {
 				DegradationLatencyFactor: 2.0, DegradationP95Ms: 800, BreakErrorRate: 0.05}))
 			Expect(sc.MinAcceptableRPS).To(Equal(100))
 			Expect(sc.ReportsPath).To(Equal("test/stress/reports"))
+		})
+
+		It("maps concurrency-ramp and the plateau tolerance", func() {
+			path := filepath.Join(GinkgoT().TempDir(), "stress-concurrency.yml")
+			Expect(os.WriteFile(path, []byte(`version: v1
+stress-config:
+  targets:
+    - {name: users, method: GET, path: /users}
+  concurrency-ramp:
+    start-workers: 20
+    step-workers: 50
+    step-duration: 10s
+    max-workers: 500
+  thresholds:
+    throughput-plateau-tolerance: 0.1
+`), 0o600)).To(Succeed())
+
+			cfg, err := config.NewLoader().Load(path)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfg.StressConfig.ConcurrencyRamp).To(Equal(pkgConfig.StressConcurrencyRamp{
+				StartWorkers: 20, StepWorkers: 50, StepDuration: 10 * time.Second, MaxWorkers: 500}))
+			Expect(cfg.StressConfig.Thresholds.ThroughputPlateauTolerance).To(Equal(0.1))
 		})
 
 		It("leaves stress-config nil when absent", func() {

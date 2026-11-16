@@ -116,10 +116,15 @@ func printPlan(w io.Writer, sc *config.StressConfig, plan *coreStress.Plan) erro
 		return err
 	}
 
-	stages := coreStress.Stages(sc.Ramp)
-	fmt.Fprintf(&b, "\nRamp: %d → %d rps, +%d every %s (%d stages, up to %s)\n",
-		sc.Ramp.StartRPS, sc.Ramp.MaxRPS, sc.Ramp.StepRPS, sc.Ramp.StepDuration,
-		len(stages), time.Duration(len(stages))*sc.Ramp.StepDuration)
+	stages := coreStress.Stages(sc)
+	start, limit, step, unit := sc.Ramp.StartRPS, sc.Ramp.MaxRPS, sc.Ramp.StepRPS, "rps"
+	if sc.Concurrent() {
+		c := sc.ConcurrencyRamp
+		start, limit, step, unit = c.StartWorkers, c.MaxWorkers, c.StepWorkers, "workers"
+	}
+	fmt.Fprintf(&b, "\nRamp: %d → %d %s, +%d every %s (%d stages, up to %s)\n",
+		start, limit, unit, step, sc.StepDuration(),
+		len(stages), time.Duration(len(stages))*sc.StepDuration())
 	for _, warn := range plan.Warnings {
 		fmt.Fprintf(&b, "Warning: %s\n", warn)
 	}

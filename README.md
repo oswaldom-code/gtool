@@ -237,6 +237,8 @@ stress-config:
       createOrder: { body-file: test/stress/order.json, weight: 3 }
   targets: []                       # explicit targets, override spec operations
   ramp: { start-rps: 10, step-rps: 10, step-duration: 20s, max-rps: 500 }
+  # or ramp by concurrent workers instead of request rate:
+  # concurrency-ramp: { start-workers: 20, step-workers: 50, step-duration: 10s, max-workers: 500 }
   thresholds: { degradation-latency-factor: 2.0, degradation-p95-ms: 800, break-error-rate: 0.05 }
   min-acceptable-rps: 100
   reports-path: test/stress/reports

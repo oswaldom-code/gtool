@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -47,10 +48,38 @@ func target(name, url string, weight int) stress.Target {
 	return stress.Target{Name: name, Method: http.MethodGet, Path: url, URLs: []string{url}, Header: http.Header{}, Weight: weight}
 }
 
+// rates builds rate stages from their requested RPS.
+func rates(rps ...int) []stress.Load {
+	var loads []stress.Load
+	for _, v := range rps {
+		loads = append(loads, stress.Load{RPS: v})
+	}
+	return loads
+}
+
+// inFlightServer records the highest number of simultaneous requests.
+type inFlightServer struct {
+	current atomic.Int64
+	peak    atomic.Int64
+}
+
+func (s *inFlightServer) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	n := s.current.Add(1)
+	for {
+		peak := s.peak.Load()
+		if n <= peak || s.peak.CompareAndSwap(peak, n) {
+			break
+		}
+	}
+	time.Sleep(10 * time.Millisecond)
+	s.current.Add(-1)
+	w.WriteHeader(http.StatusOK)
+}
+
 var _ = Describe("Stages", func() {
 	DescribeTable("expands the ramp",
 		func(r config.StressRamp, expected []int) {
-			Expect(stress.Stages(r)).To(Equal(expected))
+			Expect(stress.Stages(&config.StressConfig{Ramp: r})).To(Equal(rates(expected...)))
 		},
 		Entry("aligned steps", config.StressRamp{StartRPS: 10, StepRPS: 10, MaxRPS: 40}, []int{10, 20, 30, 40}),
 		Entry("misaligned last step is clamped to max", config.StressRamp{StartRPS: 10, StepRPS: 20, MaxRPS: 60}, []int{10, 30, 50, 60}),
@@ -58,6 +87,16 @@ var _ = Describe("Stages", func() {
 		Entry("single stage with step", config.StressRamp{StartRPS: 50, StepRPS: 10, MaxRPS: 50}, []int{50}),
 		Entry("invalid ramp yields nothing", config.StressRamp{StartRPS: 50, StepRPS: 10, MaxRPS: 10}, nil),
 	)
+
+	It("expands a concurrency ramp into worker stages", func() {
+		sc := &config.StressConfig{ConcurrencyRamp: config.StressConcurrencyRamp{StartWorkers: 20, StepWorkers: 50, MaxWorkers: 150}}
+		Expect(stress.Stages(sc)).To(Equal([]stress.Load{{Workers: 20}, {Workers: 70}, {Workers: 120}, {Workers: 150}}))
+	})
+
+	It("names a load by its unit", func() {
+		Expect(stress.Load{RPS: 50}.String()).To(Equal("50 rps"))
+		Expect(stress.Load{Workers: 8}.String()).To(Equal("8 workers"))
+	})
 })
 
 var _ = Describe("Engine", func() {
@@ -80,7 +119,7 @@ var _ = Describe("Engine", func() {
 	It("advances through every stage and collects per-stage metrics", func() {
 		handler.delay = 5 * time.Millisecond
 		stages, err := engine.Ramp(context.Background(), server.URL, []stress.Target{target("ok", "/ok", 1)},
-			[]int{20, 40}, 500*time.Millisecond, nil)
+			rates(20, 40), 500*time.Millisecond, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(stages).To(HaveLen(2))
 
@@ -104,7 +143,7 @@ var _ = Describe("Engine", func() {
 		heavy := target("heavy", "/a", 3)
 		heavy.URLs = []string{"/a?v=1", "/a?v=2", "/a?v=3"}
 		_, err := engine.Ramp(context.Background(), server.URL+"/",
-			[]stress.Target{heavy, target("light", "/b", 1)}, []int{80}, 500*time.Millisecond, nil)
+			[]stress.Target{heavy, target("light", "/b", 1)}, rates(80), 500*time.Millisecond, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		a := handler.count("/a?v=1") + handler.count("/a?v=2") + handler.count("/a?v=3")
@@ -117,7 +156,7 @@ var _ = Describe("Engine", func() {
 	It("counts 5xx as errors and 4xx apart", func() {
 		stages, err := engine.Ramp(context.Background(), server.URL, []stress.Target{
 			target("ok", "/ok", 2), target("fail", "/fail", 1), target("missing", "/missing", 1),
-		}, []int{40}, 500*time.Millisecond, nil)
+		}, rates(40), 500*time.Millisecond, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		s := stages[0]
@@ -133,7 +172,7 @@ var _ = Describe("Engine", func() {
 		url := server.URL
 		server.Close()
 		stages, err := engine.Ramp(context.Background(), url, []stress.Target{target("ok", "/ok", 1)},
-			[]int{20}, 300*time.Millisecond, nil)
+			rates(20), 300*time.Millisecond, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(stages[0].NetworkErrors).To(BeNumerically(">", 0))
 		Expect(stages[0].ErrorRate).To(Equal(1.0))
@@ -142,9 +181,29 @@ var _ = Describe("Engine", func() {
 
 	It("stops early once the breaking point is reached", func() {
 		stages, err := engine.Ramp(context.Background(), server.URL, []stress.Target{target("fail", "/fail", 1)},
-			[]int{20, 40, 60}, 300*time.Millisecond, func(s stress.StageMetrics) bool { return s.ErrorRate > 0.5 })
+			rates(20, 40, 60), 300*time.Millisecond, func(s stress.StageMetrics) bool { return s.ErrorRate > 0.5 })
 		Expect(err).NotTo(HaveOccurred())
 		Expect(stages).To(HaveLen(1))
+	})
+
+	It("keeps a fixed number of closed-loop workers in a concurrency stage", func() {
+		inFlight := &inFlightServer{}
+		busy := httptest.NewServer(inFlight)
+		defer busy.Close()
+
+		stages, err := engine.Ramp(context.Background(), busy.URL, []stress.Target{target("ok", "/ok", 1)},
+			[]stress.Load{{Workers: 4}, {Workers: 8}}, 400*time.Millisecond, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(stages).To(HaveLen(2))
+
+		Expect(stages[0].Workers).To(Equal(4))
+		Expect(stages[0].RequestedRPS).To(BeZero())
+		Expect(stages[1].Workers).To(Equal(8))
+		Expect(inFlight.peak.Load()).To(BeNumerically("==", 8), "every worker is busy and none is added")
+		// A 10ms handler bounds each worker to 100 rps.
+		Expect(stages[0].Throughput).To(BeNumerically(">", 100))
+		Expect(stages[0].Throughput).To(BeNumerically("<=", 400))
+		Expect(stages[1].Throughput).To(BeNumerically(">", stages[0].Throughput))
 	})
 
 	It("aborts when the context is cancelled", func() {
@@ -152,7 +211,7 @@ var _ = Describe("Engine", func() {
 		defer cancel()
 		start := time.Now()
 		stages, err := engine.Ramp(ctx, server.URL, []stress.Target{target("ok", "/ok", 1)},
-			[]int{20, 40}, 5*time.Second, nil)
+			rates(20, 40), 5*time.Second, nil)
 		Expect(err).To(MatchError(context.DeadlineExceeded))
 		Expect(stages).To(BeEmpty())
 		Expect(time.Since(start)).To(BeNumerically("<", 2*time.Second))

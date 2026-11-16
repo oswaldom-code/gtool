@@ -32,11 +32,13 @@ const (
 	couchbaseCLIBin = "/opt/couchbase/bin/couchbase-cli"
 	// clusterEndpoint is the in-container REST endpoint used by couchbase-cli.
 	clusterEndpoint = "localhost:8091"
+	// defaultScope always exists in a bucket, so it is never created.
+	defaultScope = "_default"
 )
 
 // ConfigKeys lists every mock-config key the plugin accepts (aliases included).
 func ConfigKeys() []string {
-	return []string{"image", "admin-port", "data-port", "user", "username", "password", "bucket", "services", "bucket-ram-mb", "cluster-ram-mb", "container-name"}
+	return []string{"image", "admin-port", "data-port", "user", "username", "password", "bucket", "services", "bucket-ram-mb", "cluster-ram-mb", "container-name", "scope", "collections"}
 }
 
 // DefaultPorts returns the host port used for each port key when the config
@@ -69,6 +71,10 @@ type CouchbaseConfig struct {
 	ClusterRAMMB  int    `json:"cluster-ram-mb"`
 	Services      string `json:"services"`
 	ContainerName string `json:"container-name"`
+	// Scope is created in the bucket unless empty or "_default".
+	Scope string `json:"scope"`
+	// Collections are created in Scope ("_default" when Scope is empty).
+	Collections []string `json:"collections"`
 }
 
 // NewCouchbasePlugin creates a new Couchbase service plugin
@@ -86,6 +92,80 @@ func NewCouchbasePlugin(dockerClient *docker.Client, logger *zap.Logger) *Couchb
 // Name returns the service identifier
 func (p *CouchbasePlugin) Name() string {
 	return "couchbase"
+}
+
+// collectionNames reads collections as a list of {name: <collection>} entries.
+// Other entry keys (e.g. id-pattern) are accepted and ignored.
+func collectionNames(config map[string]interface{}) ([]string, error) {
+	raw, ok := config["collections"]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	items, ok := raw.([]interface{})
+	if !ok {
+		return nil, gtErrors.New(gtErrors.ErrConfigInvalid,
+			"couchbase: collections must be a list of {name: <collection>} entries")
+	}
+	names := make([]string, 0, len(items))
+	for i, item := range items {
+		entry, _ := item.(map[string]interface{})
+		name := svcconfig.String(entry, "name", "")
+		if name == "" {
+			return nil, gtErrors.New(gtErrors.ErrConfigInvalid,
+				fmt.Sprintf("couchbase: collections[%d] requires a name", i))
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// collectionCommands returns the couchbase-cli invocations that create the
+// configured scope and then its collections.
+func collectionCommands(cfg *CouchbaseConfig) [][]string {
+	scope := cfg.Scope
+	if scope == "" {
+		scope = defaultScope
+	}
+	command := func(flag, value string) []string {
+		return []string{
+			couchbaseCLIBin, "collection-manage",
+			"--cluster", clusterEndpoint,
+			"--username", cfg.Username,
+			"--password", cfg.Password,
+			"--bucket", cfg.Bucket,
+			flag, value,
+		}
+	}
+
+	var cmds [][]string
+	if scope != defaultScope {
+		cmds = append(cmds, command("--create-scope", scope))
+	}
+	for _, name := range cfg.Collections {
+		cmds = append(cmds, command("--create-collection", scope+"."+name))
+	}
+	return cmds
+}
+
+// createCollections creates the configured scope and collections in the bucket
+func (p *CouchbasePlugin) createCollections(ctx context.Context, cfg *CouchbaseConfig) error {
+	for _, cmd := range collectionCommands(cfg) {
+		step := strings.Join(cmd[len(cmd)-2:], " ")
+		output, err := p.docker.ExecInContainer(ctx, p.containerID, &docker.ExecConfig{
+			Cmd:          cmd,
+			AttachStdout: true,
+			AttachStderr: true,
+		})
+		if err != nil {
+			p.logger.Error("failed to create scope or collection",
+				zap.Error(err),
+				zap.String("step", step),
+				zap.String("output", output))
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "couchbase-cli collection-manage "+step)
+		}
+		p.logger.Info("scope or collection created", zap.String("step", step))
+	}
+	return nil
 }
 
 // Launch starts the Couchbase service and initializes a single-node cluster
@@ -141,6 +221,10 @@ func (p *CouchbasePlugin) Launch(ctx context.Context, config map[string]interfac
 		if err := p.createBucket(ctx, cfg); err != nil {
 			_ = p.Stop(context.Background())
 			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to create Couchbase bucket")
+		}
+		if err := p.createCollections(ctx, cfg); err != nil {
+			_ = p.Stop(context.Background())
+			return gtErrors.Wrap(err, gtErrors.ErrServiceFailed, "failed to create Couchbase scope and collections")
 		}
 	}
 
@@ -352,6 +436,13 @@ func (p *CouchbasePlugin) parseConfig(config map[string]interface{}) (*Couchbase
 	cfg.BucketRAMMB = intOrFloat(config, "bucket-ram-mb", cfg.BucketRAMMB)
 	cfg.ClusterRAMMB = intOrFloat(config, "cluster-ram-mb", cfg.ClusterRAMMB)
 	cfg.ContainerName = svcconfig.String(config, "container-name", cfg.ContainerName)
+	cfg.Scope = svcconfig.String(config, "scope", "")
+
+	collections, err := collectionNames(config)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Collections = collections
 
 	// The cluster map advertises the container's own ports, so an SDK on the
 	// host can only reach the data service on 11210 itself.

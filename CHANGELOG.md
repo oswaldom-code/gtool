@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Couchbase: `scope` and `collections` in `mock-config` are accepted again and
+  are now created in the bucket (collections without a `scope` go to
+  `_default`; entry keys other than `name` are ignored).
+
 ## v1.0.0
 
 First stable release. Documentation: https://oswaldom-code.github.io/gtool/
